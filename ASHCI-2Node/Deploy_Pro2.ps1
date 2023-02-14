@@ -122,7 +122,7 @@ Invoke-Command -ComputerName $config.Node01 -Credential $ADCred -ScriptBlock {
     $s2 | Rename-NetAdapter -NewName "SMB2"
     
     #MGMT
-    New-NetIPAddress -InterfaceAlias "MGMT" -IPAddress $using:config.node01_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP  | Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
+    New-NetIPAddress -InterfaceAlias "MGMT1" -IPAddress $using:config.node01_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP  | Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
     
     #Storage 
     
@@ -151,7 +151,7 @@ Invoke-Command -ComputerName $config.Node02 -Credential $ADCred -ScriptBlock {
     
     
     #MGMT
-    New-NetIPAddress -InterfaceAlias "MGMT" -IPAddress $using:config.node02_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP| Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
+    New-NetIPAddress -InterfaceAlias "MGMT1" -IPAddress $using:config.node02_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP| Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
     
     #Storage 
     New-NetIPAddress -InterfaceAlias "SMB1" -IPAddress 172.16.0.2 -PrefixLength 24
