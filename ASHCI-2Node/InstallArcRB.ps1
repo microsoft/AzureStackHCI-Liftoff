@@ -12,8 +12,6 @@ param(
     [Parameter(Mandatory)]
     [String] $KeyVault,
     [Parameter(Mandatory)]
-    [String] $SecretName,
-    [Parameter(Mandatory)]
     [String] $AKSvnetname ,
     [Parameter(Mandatory)]
     [String] $AKSvSwitchName ,
@@ -42,13 +40,15 @@ param(
     [Parameter(Mandatory)]
     [String] $Location ,
     [Parameter(Mandatory)]
-    [String] $csv_path ,
-    [Parameter(Mandatory)]
     [String] $resbridgeresource_group,
     [Parameter(Mandatory)]
-    [String] $resbridgeip,  
+    [String] $resbridgeip1,
     [Parameter(Mandatory)]
-    [String] $resbridgecpip 
+    [String] $resbridgeip2,  
+    [Parameter(Mandatory)]
+    [String] $resbridgecpip,
+    [Parameter(Mandatory)]
+    [String] $csv_path
     
 
 ) 
@@ -78,33 +78,28 @@ param ()
 function DeployAKS {
     param ()
 
-$SecretDetail = Get-AzKeyVaultSecret -VaultName $KeyVault -Name $SecretName -AsPlainText
-$azureAppCred= New-Object System.Management.Automation.PSCredential ("$AzureSPNAPPId", $SecretDetail)
-#$azureAppCred = (New-Object System.Management.Automation.PSCredential $AzureSPNAPPId, (ConvertTo-SecureString -String $Arcsecretact -AsPlainText -Force))
-Connect-AzAccount -ServicePrincipal -Subscription $AzureSubID -Tenant $AzureTenantID -Credential $azureAppCred
-
-
-
-
+#$azureAppCred = (New-Object System.Management.Automation.PSCredential $AzureSPNAPPId, (ConvertTo-SecureString -String $AzureSPNSecret -AsPlainText -Force))
+#Connect-AzAccount -ServicePrincipal -Subscription $AzureSubID -Tenant $AzureTenantID -Credential $azureAppCred
+$azurecred=Connect-AzAccount -Subscription $AzureSubID -Tenant $AzureTenantID -UseDeviceAuthentication
 $context = Get-AzContext 
-$armtoken = Get-AzAccessToken
-$graphtoken = Get-AzAccessToken -ResourceTypeName AadGraph
+
+
 
 Write-Host "Prepping AKS Install"
 
 
     
+    Write-Host "Setting AKS Virtual Network on HCI Cluster" -ForegroundColor Black -BackgroundColor Green   
+    $vnet = New-AksHciNetworkSetting -name $AKSvnetname -vSwitchName $AKSvSwitchName -k8sNodeIpPoolStart $AKSNodeStartIP -k8sNodeIpPoolEnd $AKSNodeEndIP -vipPoolStart $AKSVIPStartIP -vipPoolEnd $AKSVIPEndIP -ipAddressPrefix $AKSIPPrefix -gateway $AKSGWIP -dnsServers $AKSDNSIP        
 
-    $vnet = New-AksHciNetworkSetting -name $AKSvnetname -vSwitchName $AKSvSwitchName -k8sNodeIpPoolStart $AKSNodeStartIP -k8sNodeIpPoolEnd $AKSNodeEndIP -vipPoolStart $AKSVIPStartIP -vipPoolEnd $AKSVIPEndIP -ipAddressPrefix $AKSIPPrefix -gateway $AKSGWIP -dnsServers $AKSDNSIP       
+    Write-Host "Setting AKS-MOC Configuration" -ForegroundColor Black -BackgroundColor Green 
+    Set-AksHciConfig -imageDir $AKSImagedir -workingDir $AKSWorkingdir -cloudConfigLocation $AKSCloudConfigdir -vnet $vnet -cloudservicecidr $AKSCloudSvcidr
 
-    Set-AksHciConfig -imageDir $AKSImagedir -workingDir $AKSWorkingdir -cloudConfigLocation $AKSCloudConfigdir -vnet $vnet -cloudservicecidr $AKSCloudSvcidr 
-
-    $azurecred = Connect-AzAccount -ServicePrincipal -Subscription $AzureSubID  -Tenant $AzureTenantID -Credential $azureAppCred
-
-    #$azurecred = Connect-AzAccount -Subscription $AzureSubID  -Tenant $AzureTenantID -UseDeviceAuthentication
+    #$azurecred = Connect-AzAccount -ServicePrincipal -Subscription $AzureSubID  -Tenant $AzureTenantID -Credential $azureAppCred
     
     Write-Host $AKSResourceGroupName -ForegroundColor Green -BackgroundColor Black
 
+    Write-Host "Setting AKS Registration in Azure" -ForegroundColor Black -BackgroundColor Green 
     Set-AksHciRegistration -subscriptionId $AzureSubID -resourceGroupName $AKSResourceGroupName -Tenant $AzureTenantID -Credential $azurecred
 
     Write-Host "Ready to Install AKS on HCI Cluster"
@@ -118,14 +113,12 @@ Write-Host "Prepping AKS Install"
 
 Function InstallArcRB {
 param ()
-
-$SecretDetail = Get-AzKeyVaultSecret -VaultName $KeyVault -Name $SecretName
-$azureAppCred= New-Object System.Management.Automation.PSCredential ($AzureSPNAPPId, $SecretDetail.SecretValue)
-#$azureAppCred = (New-Object System.Management.Automation.PSCredential $AzureSPNAPPId, (ConvertTo-SecureString -String $ARCSecret -AsPlainText -Force))
+Write-Host "Logging into your Azure Account" -ForegroundColor Black -BackgroundColor Green 
+#$azureAppCred = (New-Object System.Management.Automation.PSCredential $AzureSPNAPPId, (ConvertTo-SecureString -String $AzureSPNSecret -AsPlainText -Force))
 #Connect-AzAccount -ServicePrincipal -Subscription $AzureSubID -Tenant $AzureTenantID -Credential $azureAppCred
-$context = Get-AzContext # Azure credential
-$armtoken = Get-AzAccessToken
-$graphtoken = Get-AzAccessToken -ResourceTypeName AadGraph
+#Connect-AzAccount -ServicePrincipal -Subscription $AzureSubID -Tenant $AzureTenantID -UseDeviceAuthentication
+
+
 
 
 #Install AZ Resource Bridge
@@ -140,7 +133,7 @@ Install-Module -Name ArcHci -Force -Confirm:$false -SkipPublisherCheck -AcceptLi
 
 
 #Install AZ CLI
-
+Write-Host "Installing Azure CLI" -ForegroundColor Black -BackgroundColor Green 
 $ProgressPreference = 'SilentlyContinue'; 
 Invoke-WebRequest -Uri https://aka.ms/installazurecliwindows -OutFile .\AzureCLI.msi; 
 Start-Process msiexec.exe -Wait -ArgumentList '/I AzureCLI.msi /quiet'; rm .\AzureCLI.msi
@@ -148,44 +141,59 @@ Start-Process msiexec.exe -Wait -ArgumentList '/I AzureCLI.msi /quiet'; rm .\Azu
 
 
 #Install Required Extensions
-
+Write-Host "Preparing Required Extensions" -ForegroundColor Black -BackgroundColor Green 
 az extension remove --name arcappliance
 az extension remove --name connectedk8s
 az extension remove --name k8s-configuration
 az extension remove --name k8s-extension
 az extension remove --name customlocation
 az extension remove --name azurestackhci
-az extension add --upgrade --name arcappliance
+#az extension add --upgrade --name arcappliance   REMOVED for TEMP WORKAROUDN TO KNOWN BUG 
+az extension add --version 0.2.29 --name arcappliance
 az extension add --upgrade --name connectedk8s
 az extension add --upgrade --name k8s-configuration
 az extension add --upgrade --name k8s-extension
 az extension add --upgrade --name customlocation
 az extension add --upgrade --name azurestackhci
 
+az provider register --namespace Microsoft.Kubernetes --wait
+az provider register --namespace Microsoft.KubernetesConfiguration --wait
+az provider register --namespace Microsoft.ExtendedLocation --wait
+az provider register --namespace Microsoft.ResourceConnector --wait
+az provider register --namespace Microsoft.AzureStackHCI --wait
+az provider register --namespace Microsoft.HybridConnectivity --wait
 
 
-#$csv_path= "C:\clusterstorage\Volume01"
+
+
 $resource_name= ((Get-AzureStackHci).AzureResourceName) + "-arcbridge"
 
 mkdir $csv_path\ResourceBridge
 
+#az login --service-principal -u $AzureSPNAPPId -p $AzureSPNSecret --tenant $AzureTenantID
 
-#az login --service-principal -u $AzureSPNAPPId -p $azureAppCred.GetNetworkCredential().Password --tenant $AzureTenantID
+az login --use-device-code --tenant $azuretenantid
 
-az login --use-device-code --tenant $AzureTenantID --subscription $AzureSubID
+az account set --subscription $AzureSubID
 
-New-ArcHciConfigFiles -subscriptionId $AzureSubID -location $Location -resourceGroup $resbridgeresource_group -resourceName $resource_name -workDirectory $csv_path\ResourceBridge -controlPlaneIP $resbridgecpip  -k8snodeippoolstart $resbridgeip -k8snodeippoolend $resbridgeip -gateway $AKSGWIP -dnsservers $AKSDNSIP -ipaddressprefix $AKSIPPrefix   
  
+
+New-ArcHciConfigFiles -subscriptionID $AzureSubID -location $location -resourceGroup $resbridgeresource_group -resourceName $resource_name -workDirectory $csv_path\ResourceBridge -controlPlaneIP $resbridgecpip -vipPoolStart $resbridgecpip -vipPoolEnd $resbridgecpip -k8snodeippoolstart $resbridgeip1 -k8snodeippoolend $resbridgeip2 -gateway $AKSGWIP -dnsservers $AKSDNSIP -ipaddressprefix $AKSIPPrefix  -vswitchName $AKSvSwitchName #-vLanID $vlanID
+
+Write-Host "Validating Azure Arc Resource Bridge" -ForegroundColor Black -BackgroundColor Green 
+
 az arcappliance validate hci --config-file $csv_path\ResourceBridge\hci-appliance.yaml
 
  
+Write-Host "Preparing Arc Resource Bridge" -ForegroundColor Black -BackgroundColor Green 
 
 az arcappliance prepare hci --config-file $csv_path\ResourceBridge\hci-appliance.yaml
 
 
-
+Write-Host "Deploying Arc Resource Bridge" -ForegroundColor Black -BackgroundColor Green 
 az arcappliance deploy hci --config-file  $csv_path\ResourceBridge\hci-appliance.yaml --outfile  $csv_path\ResourceBridge\config\
 
+Write-Host "Creating Arc Resource Bridge" -ForegroundColor Black -BackgroundColor Green 
 
 az arcappliance create hci --config-file $csv_path\ResourceBridge\hci-appliance.yaml --kubeconfig $csv_path\ResourceBridge\config\
 
@@ -197,18 +205,8 @@ Start-Sleep 180
 }
 
 
+#Main 
 
 InstallModules
-
-
-$azlogin = Connect-AzAccount -Subscription $azuresubid -UseDeviceAuthentication -TenantId $AzureTenantID 
-Select-AzSubscription -Subscription $AzureSubID
-
-$Arcsecretact=Get-AzKeyVaultSecret -VaultName $KeyVault -Name "CPPE-ARC-SPN-Account" -AsPlainText
-#$ARCSecret=$arcsecretact.SecretValue
-
-
-
-
 DeployAKS
 InstallArcRB
