@@ -31,14 +31,14 @@ $azlogin = Connect-AzAccount -Subscription $config.azuresubid
 Select-AzSubscription -Subscription $config.AzureSubID
 #Set AD Domain Cred
 $AzDJoin = Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "DomainJoinerSecret"
-$ADcred = [pscredential]::new("domain\djoin",$AZDJoin.SecretValue)
+$ADcred = [pscredential]::new("fc\djoin",$AZDJoin.SecretValue)
 #$ADpassword = ConvertTo-SecureString "" -AsPlainText -Force
 #$ADCred = New-Object System.Management.Automation.PSCredential ("contoso\djoiner", $ADpassword)
 
 #Set Cred for AAD tenant and subscription
-$AADAccount = "user@domain.com"
+$AADAccount = "azstackadmin@azurestackdemo1.onmicrosoft.com"
 $AADAdmin=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "azurestackadmin"
-$AADCred = [pscredential]::new("user@domain.com",$AADAdmin.SecretValue)
+$AADCred = [pscredential]::new("azstackadmin@azurestackdemo1.onmicrosoft.com",$AADAdmin.SecretValue)
 $Arcsecretact=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "ArcSPN"
 $ARCSecret=$arcsecretact.SecretValue
 #$ARCSPN=[pscredential]::new("92ba32da-56d0-449d-b6e3-9d1c64b88a19",$ARCSecret.SecretValue) 
@@ -122,7 +122,7 @@ Invoke-Command -ComputerName $config.Node01 -Credential $ADCred -ScriptBlock {
     $s2 | Rename-NetAdapter -NewName "SMB2"
     
     #MGMT
-    New-NetIPAddress -InterfaceAlias "MGMT1" -IPAddress $using:config.node01_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP  | Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
+    New-NetIPAddress -InterfaceAlias "MGMT" -IPAddress $using:config.node01_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP  | Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
     
     #Storage 
     
@@ -151,7 +151,7 @@ Invoke-Command -ComputerName $config.Node02 -Credential $ADCred -ScriptBlock {
     
     
     #MGMT
-    New-NetIPAddress -InterfaceAlias "MGMT1" -IPAddress $using:config.node02_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP| Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
+    New-NetIPAddress -InterfaceAlias "MGMT" -IPAddress $using:config.node02_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP| Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
     
     #Storage 
     New-NetIPAddress -InterfaceAlias "SMB1" -IPAddress 172.16.0.2 -PrefixLength 24
@@ -388,10 +388,10 @@ write-host -ForegroundColor Green -Object "Register the Cluster to Azure Subscri
 
 #Register Cluster with Azure
 Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp {
-    Connect-AzAccount -Credential $using:AADCred
+    Connect-AzAccount -Credential $using:AADCred -TenantId $azuretenentid
     $armtoken = Get-AzAccessToken
     $graphtoken = Get-AzAccessToken -ResourceTypeName AadGraph
-    Register-AzStackHCI -SubscriptionId $using:config.AzureSubID -ComputerName $using:config.Node01 -AccountId $using:AADAccount -ArmAccessToken $armtoken.Token -GraphAccessToken $graphtoken.Token -EnableAzureArcServer -Credential $using:ADCred -Region "East US" -ResourceName $using:config.ClusterName
+    Register-AzStackHCI -SubscriptionId $using:config.AzureSubID -ComputerName $using:config.Node01 -AccountId $using:AADAccount -ArmAccessToken $armtoken.Token -GraphAccessToken $graphtoken.Token  -Region "East US" 
     }
 
 }
@@ -427,8 +427,10 @@ $remotevar=@{
                 AKSResourceGroupName= $config.AKSResourceGroupName
                 Location= $config.Location
                 resbridgeresource_group= $config.resbridgeresource_group
-                resbridgeip= $config.resbridgeip
+                resbridgeip1= $config.resbridgeip1
+                resbridgeip2= $config.resbridgeip2
                 resbridgecpip= $config.resbridgecpip
+                csv_path=$config.csv_path
                 }
           )
     Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp -ArgumentList $remotevar -ScriptBlock {
@@ -458,13 +460,14 @@ $remotevar=@{
                 $AKSResourceGroupName= $remotevar.AKSResourceGroupName
                 $Location= $remotevar.Location
                 $resbridgeresource_group= $remotevar.resbridgeresource_group
-                $resbridgeip= $remotevar.resbridgeip
+                $resbridgeip1= $remotevar.resbridgeip1
+                $resbridgeip2= $remotevar.resbridgeip2
                 $resbridgecpip= $remotevar.resbridgecpip
-
+                $csv_path=$RemoteVar.csv_path
         
                
         
-      C:\temp\InstallArcRB.ps1 -AzureSubId $AzureSubID -AzureSPNAppID $AzureSPNAppID -AzureSPNSecret $AzureSPNSecret -AzureTenantID $AzureTenantID -KeyVault $KeyVault -AKSvnetname $AKSvnetname -AKSvSwitchName $AKSvSwitchName -AKSNodeStartIP $AKSNodeStartIP -AKSNodeEndIP $AKSNodeEndIP -AKSVIPStartIP $AKSVIPStartIP -AKSVIPEndIP $AKSVIPEndIP -AKSIPPrefix $AKSIPPrefix -AKSGWIP $AKSGWIP -AKSDNSIP $AKSDNSIP -AKSImagedir $AKSImagedir -AKSWorkingdir $AKSWorkingdir -AKSCloudSvcidr $AKSCloudSvcidr -AKSResourceGroupName $AKSResourceGroupName -Location $Location -resbridgeresource_group $resbridgeresource_group -resbridgeip $resbridgeip -resbridgecpip $resbridgecpip 
+      C:\temp\InstallArcRB.ps1 -AzureSubId $AzureSubID -AzureSPNAppID $AzureSPNAppID -AzureSPNSecret $AzureSPNSecret -AzureTenantID $AzureTenantID -KeyVault $KeyVault -AKSvnetname $AKSvnetname -AKSvSwitchName $AKSvSwitchName -AKSNodeStartIP $AKSNodeStartIP -AKSNodeEndIP $AKSNodeEndIP -AKSVIPStartIP $AKSVIPStartIP -AKSVIPEndIP $AKSVIPEndIP -AKSIPPrefix $AKSIPPrefix -AKSGWIP $AKSGWIP -AKSDNSIP $AKSDNSIP -AKSImagedir $AKSImagedir -AKSWorkingdir $AKSWorkingdir -AKSCloudSvcidr $AKSCloudSvcidr -AKSResourceGroupName $AKSResourceGroupName -Location $Location -resbridgecpip $resbridgecpip -resbridgeresource_group $resbridgeresource_group -resbridgeip1 $resbridgeip1 -resbridgeip2 $resbridgeip2 -csv_path $csv_path
   
 
              }
@@ -481,7 +484,16 @@ $remotevar=@{
                 Location=$config.Location
                 customloc_name=$config.customloc_name
                 vSwitchName=$config.AKSvSwitchName
-
+                csv_path=$config.csv_path
+                akshybrid_virtualnetwork=$config.akshybrid_virtualnetwork
+                akshybrid_ipaddressprefix=$config.akshybrid_ipaddressprefix
+                akshybrid_gateway=$config.akshybrid_gateway
+                akshybrid_dns=$config.akshybrid_dns
+                akshybrid_vippoolstart=$config.akshybrid_vippoolstart
+                akshybrid_vippoolend=$config.akshybrid_vippoolstart
+                akshybrid_k8snodeippoolstart=$config.akshybrid_k8snodeippoolstart
+                akshybrid_k8snodeippoolend=$config.akshybrid_k8snodeippoolstart
+                vmss_vnetname=$config.vmss_vnetname
                 }
         )
 
@@ -498,58 +510,92 @@ $remotevar=@{
                 $resource_group=$remotevar.resource_group
                 $subscription=$remotevar.subscription
                 $Location=$remotevar.Location
-                $customloc_name=$remotevar.customloc_name
-                $vSwitchName=$RemoteVar.AKSvSwitchName
-                
-      <#
-                $AzureSPNAppID= $config.AzureSPNAppID 
-                $AzureSPNSecret= $config.AzureSPNSecret 
-                $AzureTenantID= $config.AzureTenantID
-                $resource_group=$config.resource_group
-                $subscription=$config.subscription
-                $Location=$config.Location
-                $customloc_name=$config.customloc_name
-                $vSwitchName=$config.AKSvSwitchName
-                $hciClusterId= (Get-AzureStackHci).AzureResourceUri
-                $resource_name= ((Get-AzureStackHci).AzureResourceName) + "-arcbridge"
-#>
-        
+                $customlocname=$remotevar.customloc_name
+                $vSwitchName=$RemoteVar.vSwitchName
+                $csv_path=$remotevar.csv_path
+                $vmss_vnetname=$remotevar.vmss_vnetname
+                $akshybrid_virtualnetwork=$remotevar.akshybrid_virtualnetwork
+                $akshybrid_ipaddressprefix=$remotevar.akshybrid_ipaddressprefix
+                $akshybrid_gateway=$remotevar.akshybrid_gateway
+                $akshybrid_dns=$remotevar.akshybrid_dns
+                $akshybrid_vippoolstart=$remotevar.akshybrid_vippoolstart
+                $akshybrid_vippoolend=$remotevar.akshybrid_vippoolend
+                $akshybrid_k8snodeippoolstart=$remotevar.akshybrid_k8snodeippoolstart
+                $akshybrid_k8snodeippoolend=$remotevar.akshybrid_k8snodeippoolend
+
         Write-Host "Logging into Azure" -ForegroundColor Green -BackgroundColor Black
 
-         #az login  --service-principal -u $AzureSPNAppID -p $AzureSPNSecret  --tenant $AzureTenantID
-         az login --use-device-code
-         az config set extension.use_dynamic_install=yes_without_prompt
+        az login --use-device-code --tenant $azuretenantid
+        az config set extension.use_dynamic_install=yes_without_prompt
 
-         $hciClusterId= (Get-AzureStackHci).AzureResourceUri
-         $resource_name= ((Get-AzureStackHci).AzureResourceName) + "-arcbridge"
-         $csv_path="C:\clusterstorage\volume01"
+        Install-Module -Name ArcHci -RequiredVersion 0.2.18
 
-        Write-Host "Creating Extension" -ForegroundColor Green -BackgroundColor Black
-        az k8s-extension create --cluster-type appliances --cluster-name $resource_name --resource-group $resource_group --name hci-vmoperator --extension-type Microsoft.AZStackHCI.Operator --scope cluster --release-namespace helm-operator2 --configuration-settings Microsoft.CustomLocation.ServiceAccount=hci-vmoperator --configuration-protected-settings-file $csv_path\ResourceBridge\hci-config.json --configuration-settings HCIClusterID=$hciClusterId --auto-upgrade true
-
-
-        Write-Host "Creating Custom Location $customloc_name" -ForegroundColor Green -BackgroundColor Black
-         az customlocation create --resource-group $resource_group --name $customloc_name --cluster-extension-ids "/subscriptions/$subscription/resourceGroups/$resource_group/providers/Microsoft.ResourceConnector/appliances/$resource_name/providers/Microsoft.KubernetesConfiguration/extensions/hci-vmoperator" --namespace default --host-resource-id "/subscriptions/$subscription/resourceGroups/$resource_group/providers/Microsoft.ResourceConnector/appliances/$resource_name" --location $Location
-
-         Write-Host "Creating Virtual Network Resource for Arc Virtual Machine Management" -ForegroundColor Green -BackgroundColor Black
-         #$vlanid="0"   
-         $vnetName="default-vnet"
-         New-MocGroup -name "Default_Group" -location "MocLocation"
-         New-MocVirtualNetwork -name "$vnetName" -group "Default_Group" -tags @{'VSwitch-Name' = "ConvergedSwitch(hci)"} 
-         az azurestackhci virtualnetwork create --subscription $subscription --resource-group $resource_group --extended-location name="/subscriptions/$subscription/resourceGroups/$resource_group/providers/Microsoft.ExtendedLocation/customLocations/$customloc_name" type="CustomLocation" --location $Location --network-type "Transparent" --name $vnetName #--vlan $vlanid
-
-
-        Write-Host "Creating Custom Location and Network Resources for Hybid AKS Cluster Provisioning"
-
-        
-        
+        $hciClusterId= (Get-AzureStackHci).AzureResourceUri
+        $resource_name= ((Get-AzureStackHci).AzureResourceName) + "-arcbridge"
        
 
-         Write-Host "Custom Resource is a Success!" -ForegroundColor Green -BackgroundColor Black
-    
-         
+      #Create VM Operator Extension
+      az k8s-extension create --cluster-type appliances --cluster-name $resource_name --resource-group $resource_group --name hci-vmoperator --extension-type Microsoft.AZStackHCI.Operator --scope cluster --release-namespace helm-operator2 --configuration-settings Microsoft.CustomLocation.ServiceAccount=hci-vmoperator --config-protected-file $csv_path\ResourceBridge\hci-config.json --configuration-settings HCIClusterID=$hciClusterId --auto-upgrade true
+
+      #Create AKS-Hybrid Extension
+      az k8s-extension create -g $resource_group -c $resource_name --cluster-type appliances --name hci-aksoperator --extension-type Microsoft.HybridAKSOperator --config Microsoft.CustomLocation.ServiceAccount=hci-vmoperator --version "0.1.101-onebranch-official" --release-train "staging" 
+   
+      #Get Applicance Extension Detail
+      $applianceID=(az arcappliance show -g $resource_group  -n $resource_name --query id -o tsv)
+       
+      $operatorname = "hci-vmoperator"
+      
+      #VM Operator Extension ID
+      $extensionID=(az k8s-extension show -g $resource_group  -c $resource_name --cluster-type appliances --name $operatorname --query id -o tsv)
+      
+      #AKS Hybrid Extension ID
+      $ClusterExtensionResourceId=az k8s-extension show -g $resource_group -c $resource_name --cluster-type appliances --name hci-aksoperator --query id -o tsv
+
+
+      #Create Custom Location with VM Operator
+      az customlocation create --resource-group $resource_group --name $CustomLocName --cluster-extension-ids $extensionID --namespace $operatorname --host-resource-id $applianceID
+       
+      #Update Custom Location with AKS-Hybrid Extension
+      az customlocation patch -g $resource_group -n $CustomLocName --namespace $operatorname  --host-resource-id $applianceID --cluster-extension-ids $ClusterExtensionResourceId $extensionID                  
+
+
+      #VM-Operator- VNet Creation Repeat this step for every new Vnet used by VM Operator
+      
+      Write-Host "Creating Virtual Network Resource for Arc Virtual Machine Management" -ForegroundColor Green -BackgroundColor Black
+
+      #$vlanid="0"   
+
+      $vnetName=$vmss_vnetname
+
+      New-MocGroup -name "Default_Group" -location "MocLocation"
+        
+      New-MocVirtualNetwork -name "$vnetName" -group "Default_Group" -tags @{'VSwitch-Name' = "$vSwitchName"}  
+
+      az azurestackhci virtualnetwork create --subscription $subscription --resource-group $resource_group --extended-location name="/subscriptions/$subscription/resourceGroups/$resource_group/providers/Microsoft.ExtendedLocation/customLocations/$customlocname" type="CustomLocation" --location $Location --network-type "Transparent" --name $vnetName #--vlan $vlanid
+
+      #VM-Operator-Marketplace Image Download
+       
+      $osType = "Windows"
+
+      $customLocationID=(az customlocation show --resource-group $resource_group --name "$customlocname" --query id -o tsv)
+
+      az azurestackhci image create --subscription $subscription --resource-group $resource_group --extended-location name=$customLocationID type="CustomLocation" --location $Location --name "Server22AECore"  --os-type $osType --offer "windowsserver" --publisher "microsoftwindowsserver" --sku "2022-datacenter-azure-edition-core" --version "20348.707.220609"
+
+      #AKS-Hybrid Create AKS Virtual Network
+   
+
+      New-KvaVirtualNetwork -name $akshybrid_virtualnetwork -vswitchname "$vSwitchName" -ipaddressprefix $akshybrid_ipaddressprefix  -gateway $akshybrid_gateway -dnsservers $akshybrid_dns -vippoolstart $akshybrid_vippoolstart -vippoolend $akshybrid_vippoolend -k8snodeippoolstart $akshybrid_k8snodeippoolstart -k8snodeippoolend $akshybrid_k8snodeippoolend -kubeconfig $csv_path\ResourceBridge\config\ 
+      
+      az hybridaks vnet create --name $akshybrid_virtualnetwork --resource-group $resource_group --custom-location $customlocname --moc-vnet-name $akshybrid_virtualnetwork
+      
+      #AKS-Hybrid Download Mariner Images
+      Add-ArcHciK8sGalleryImage -k8sVersion 1.22.11
+
     }
+
 }
+
+
 
 
 #End Function Region
@@ -571,10 +617,10 @@ $ADcred = [pscredential]::new("fc\djoin",$AZDJoin.SecretValue)
 #$ADCred = New-Object System.Management.Automation.PSCredential ("contoso\djoiner", $ADpassword)
 
 #Set Cred for AAD tenant and subscription
-$AADAccount = "user@domain.com"
+$AADAccount = "azstackadmin@azurestackdemo1.onmicrosoft.com"
 $AADAdmin=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "azurestackadmin"
-$AADCred = [pscredential]::new("user@domain.com",$AADAdmin.SecretValue)
-$Arcsecretact=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "SPN"
+$AADCred = [pscredential]::new("azstackadmin@azurestackdemo1.onmicrosoft.com",$AADAdmin.SecretValue)
+$Arcsecretact=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "FCSPN"
 $ARCSecret=$arcsecretact.SecretValue
 $Session1=New-PSSession -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp
 
@@ -650,7 +696,39 @@ addcustomlocation
                 $ErrorActionPreference = $orginalErrorAction
             }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Main execution begins here
+
+
+
+
 
 
 
