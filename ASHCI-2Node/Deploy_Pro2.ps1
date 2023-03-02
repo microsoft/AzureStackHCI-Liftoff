@@ -401,7 +401,7 @@ param ()
 
 New-Item -Path \\$($config.Node01)\c$ -Name Temp -ItemType Directory
 
-Copy-Item C:\Scripts\InstallArcRB.ps1 -Destination \\$($config.Node01)\C$\temp
+Copy-Item C:\Scripts\FourthCoffee\InstallArcRB.ps1 -Destination \\$($config.Node01)\C$\temp
 }
 
 function runAKSRBInstall{
@@ -474,6 +474,76 @@ $remotevar=@{
 
     }
 
+    function runMocRBInstall{
+        param (
+        $remotevar=@{ 
+                        AzureSubId = $config.AzureSubID 
+                        AzureSPNAppID= $config.AzureSPNAppID 
+                        AzureSPNSecret= $config.AzureSPNSecret 
+                        AzureTenantID= $config.AzureTenantID 
+                        KeyVault= $config.KeyVault
+                        AKSvnetname= $config.AKSvnetname
+                        AKSvSwitchName =$config.AKSvSwitchName
+                        AKSNodeStartIP= $config.AKSNodeStartIP
+                        AKSNodeEndIP= $config.AKSNodeEndIP
+                        AKSVIPStartIP =$config.AKSVIPStartIP
+                        AKSVIPEndIP= $config.AKSVIPEndIP
+                        AKSIPPrefix=$config.AKSIPPrefix
+                        AKSGWIP =$config.AKSGWIP
+                        AKSDNSIP= $config.AKSDNSIP
+                        AKSImagedir =$config.AKSImagedir
+                        AKSWorkingdir =$config.AKSWorkingdir
+                        AKSCloudSvcidr =$config.AKSCloudSvcidr
+                        AKSResourceGroupName= $config.AKSResourceGroupName
+                        Location= $config.Location
+                        resbridgeresource_group= $config.resbridgeresource_group
+                        resbridgeip1= $config.resbridgeip1
+                        resbridgeip2= $config.resbridgeip2
+                        resbridgecpip= $config.resbridgecpip
+                        csv_path=$config.csv_path
+                        }
+                  )
+            Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp -ArgumentList $remotevar -ScriptBlock {
+                param (
+                $RemoteVar
+                )
+        
+        
+                
+                        $AzureSubId = $remotevar.AzureSubID 
+                        $AzureSPNAppID= $remotevar.AzureSPNAppID 
+                        $AzureSPNSecret= $remotevar.AzureSPNSecret 
+                        $AzureTenantID= $remotevar.AzureTenantID 
+                        $KeyVault= $remotevar.KeyVault
+                        $AKSvnetname= $remotevar.AKSvnetname
+                        $AKSvSwitchName =$remotevar.AKSvSwitchName
+                        $AKSNodeStartIP= $remotevar.AKSNodeStartIP
+                        $AKSNodeEndIP= $remotevar.AKSNodeEndIP
+                        $AKSVIPStartIP =$remotevar.AKSVIPStartIP
+                        $AKSVIPEndIP= $remotevar.AKSVIPEndIP
+                        $AKSIPPrefix =$remotevar.AKSIPPrefix
+                        $AKSGWIP =$remotevar.AKSGWIP
+                        $AKSDNSIP= $remotevar.AKSDNSIP
+                        $AKSImagedir =$remotevar.AKSImagedir
+                        $AKSWorkingdir =$remotevar.AKSWorkingdir
+                        $AKSCloudSvcidr =$remotevar.AKSCloudSvcidr
+                        $AKSResourceGroupName= $remotevar.AKSResourceGroupName
+                        $Location= $remotevar.Location
+                        $resbridgeresource_group= $remotevar.resbridgeresource_group
+                        $resbridgeip1= $remotevar.resbridgeip1
+                        $resbridgeip2= $remotevar.resbridgeip2
+                        $resbridgecpip= $remotevar.resbridgecpip
+                        $csv_path=$RemoteVar.csv_path
+                
+                       
+                
+              C:\temp\InstallMocRB.ps1 -AzureSubId $AzureSubID -AzureSPNAppID $AzureSPNAppID -AzureSPNSecret $AzureSPNSecret -AzureTenantID $AzureTenantID -KeyVault $KeyVault -AKSvnetname $AKSvnetname -AKSvSwitchName $AKSvSwitchName -AKSNodeStartIP $AKSNodeStartIP -AKSNodeEndIP $AKSNodeEndIP -AKSVIPStartIP $AKSVIPStartIP -AKSVIPEndIP $AKSVIPEndIP -AKSIPPrefix $AKSIPPrefix -AKSGWIP $AKSGWIP -AKSDNSIP $AKSDNSIP -AKSImagedir $AKSImagedir -AKSWorkingdir $AKSWorkingdir -AKSCloudSvcidr $AKSCloudSvcidr -AKSResourceGroupName $AKSResourceGroupName -Location $Location -resbridgecpip $resbridgecpip -resbridgeresource_group $resbridgeresource_group -resbridgeip1 $resbridgeip1 -resbridgeip2 $resbridgeip2 -csv_path $csv_path
+          
+        
+                     }
+        
+            }
+        
     function addcustomlocation{
     param($remotevar=@{
                 AzureSPNAppID= $config.AzureSPNAppID 
@@ -584,7 +654,7 @@ $remotevar=@{
       #AKS-Hybrid Create AKS Virtual Network
    
 
-      New-KvaVirtualNetwork -name $akshybrid_virtualnetwork -vswitchname "$vSwitchName" -ipaddressprefix $akshybrid_ipaddressprefix  -gateway $akshybrid_gateway -dnsservers $akshybrid_dns -vippoolstart $akshybrid_vippoolstart -vippoolend $akshybrid_vippoolend -k8snodeippoolstart $akshybrid_k8snodeippoolstart -k8snodeippoolend $akshybrid_k8snodeippoolend -kubeconfig $csv_path\ResourceBridge\config\ 
+      New-KvaVirtualNetwork -name $akshybrid_virtualnetwork -vswitchname "$vSwitchName" -ipaddressprefix $akshybrid_ipaddressprefix  -gateway $akshybrid_gateway -dnsservers $akshybrid_dns -vippoolstart $akshybrid_vippoolstart -vippoolend $akshybrid_vippoolend -k8snodeippoolstart $akshybrid_k8snodeippoolstart -k8snodeippoolend $akshybrid_k8snodeippoolend -kubeconfig $csv_path\ResourceBridge\config\ -vLanID 42
       
       az hybridaks vnet create --name $akshybrid_virtualnetwork --resource-group $resource_group --custom-location $customlocname --moc-vnet-name $akshybrid_virtualnetwork
       
