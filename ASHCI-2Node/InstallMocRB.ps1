@@ -59,15 +59,30 @@ function  InstallPreReqs {
         Install-Module -Name ArcHci -Repository PSGallery -AcceptLicense -Force
 		
         curl.exe -LO "https://dl.k8s.io/release/v1.26.0/bin/windows/amd64/kubectl.exe"
-        $config = Get-MocConfig
+        #$config = Get-MocConfig
         cp .\kubectl.exe $config.installationPackageDir
 
-        az extension add --name k8s-extension --upgrade
-        az extension add --name customlocation --upgrade
-        az extension add --name arcappliance --upgrade
-        az extension add --name hybridaks --upgrade
+        az extension remove --name arcappliance
+        az extension remove --name connectedk8s
+        az extension remove --name k8s-configuration
+        az extension remove --name k8s-extension
+        az extension remove --name customlocation
+        az extension remove --name azurestackhci
+        #az extension add --upgrade --name arcappliance   REMOVED for TEMP WORKAROUDN TO KNOWN BUG 
+        az extension add --version 0.2.29 --name arcappliance
+        az extension add --upgrade --name connectedk8s
+        az extension add --upgrade --name k8s-configuration
+        az extension add --upgrade --name k8s-extension
+        az extension add --upgrade --name customlocation
+        az extension add --upgrade --name azurestackhci
+        
+        az provider register --namespace Microsoft.Kubernetes --wait
+        az provider register --namespace Microsoft.KubernetesConfiguration --wait
+        az provider register --namespace Microsoft.ExtendedLocation --wait
+        az provider register --namespace Microsoft.ResourceConnector --wait
+        az provider register --namespace Microsoft.AzureStackHCI --wait
+        az provider register --namespace Microsoft.HybridConnectivity --wait
 }
-
 function RunMocInstall {
     param ()
         Write-Host "Intializing MOC" -ForegroundColor Black -BackgroundColor Green    
@@ -101,10 +116,12 @@ function  InstallArcRB {
     Write-Host "Preparing Azure Arc Resource Bridge Resources for Installation" -ForegroundColor Black -BackgroundColor Green 
 	Write-Host $AKSIPPrefix
 	Write-Host $CSV_path
+    New-Item -Path $CSV_path -ItemType Directory -Name "ResourceBridge" 
+
 	
     $resource_name= ((Get-AzureStackHci).AzureResourceName) + "-arcbridge" 
 	import-module archci -RequiredVersion 0.2.20    
-New-ArcHciConfigFiles -subscriptionID $AzureSubID -location $location -resourceGroup $resbridgeresource_group -resourceName $resource_name -workDirectory $csv_path\ResourceBridge -controlPlaneIP $resbridgecpip -vipPoolStart $resbridgecpip -vipPoolEnd $resbridgecpip -k8snodeippoolstart $resbridgeip1 -k8snodeippoolend $resbridgeip2 -gateway $AKSGWIP -dnsservers $AKSDNSIP -ipaddressprefix $AKSIPPrefix -vswitchName $AKSvSwitchName -vnetName $AKSvnetname
+    New-ArcHciConfigFiles -subscriptionID $AzureSubID -location $location -resourceGroup $resbridgeresource_group -resourceName $resource_name -workDirectory $csv_path\ResourceBridge -controlPlaneIP $resbridgecpip -vipPoolStart $resbridgecpip -vipPoolEnd $resbridgecpip -k8snodeippoolstart $resbridgeip1 -k8snodeippoolend $resbridgeip2 -gateway $AKSGWIP -dnsservers $AKSDNSIP -ipaddressprefix $AKSIPPrefix -vswitchName $AKSvSwitchName -vnetName $AKSvnetname
 
     Write-Host "Validating Azure Arc Resource Bridge" -ForegroundColor Black -BackgroundColor Green 
     az arcappliance validate hci --config-file $csv_path\ResourceBridge\hci-appliance.yaml
@@ -130,8 +147,10 @@ New-ArcHciConfigFiles -subscriptionID $AzureSubID -location $location -resourceG
 
 }        
 
-
-
-RunMocInstall
 AzLogin
+InstallPreReqs
+RunMocInstall
 InstallArcRB
+
+
+
