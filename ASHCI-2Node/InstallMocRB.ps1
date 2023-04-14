@@ -55,22 +55,14 @@ function  InstallPreReqs {
     param ()
         Install-PackageProvider -Name NuGet -Force
         Install-Module -Name PowershellGet -Force -Confirm:$false -SkipPublisherCheck
-        Install-Module -Name AksHci -Repository PSGallery -AcceptLicense -Force
-        Install-Module -Name ArcHci -Repository PSGallery -AcceptLicense -Force
-		
-        curl.exe -LO "https://dl.k8s.io/release/v1.26.0/bin/windows/amd64/kubectl.exe"
-        #$config = Get-MocConfig
-        cp .\kubectl.exe $config.installationPackageDir
+        Install-Module -Name ArcHci -Repository PSGallery -AcceptLicense -Force -RequiredVersion 0.2.21
 
         az extension remove --name arcappliance
-        az extension remove --name connectedk8s
         az extension remove --name k8s-configuration
         az extension remove --name k8s-extension
         az extension remove --name customlocation
         az extension remove --name azurestackhci
-        #az extension add --upgrade --name arcappliance   REMOVED for TEMP WORKAROUDN TO KNOWN BUG 
-        az extension add --version 0.2.29 --name arcappliance
-        az extension add --upgrade --name connectedk8s
+        az extension add --upgrade --name arcappliance
         az extension add --upgrade --name k8s-configuration
         az extension add --upgrade --name k8s-extension
         az extension add --upgrade --name customlocation
@@ -89,14 +81,10 @@ function RunMocInstall {
         Initialize-MocNode
 
         Write-Host "Setting the MOC Configuration" -ForegroundColor Black -BackgroundColor Green
-        Set-MocConfig -workingDir  $AKSWorkingdir -cloudServiceIP $AKSCloudSvcidr -cloudConfigLocation $AKSCloudConfigdir -catalog "aks-hci-stable-catalogs-int" -ring "monthly"
+        Set-MocConfig -workingDir  $AKSWorkingdir 
         
         Write-Host "Installing MOC" -ForegroundColor Black -BackgroundColor Green
         Install-Moc
-        
-        Write-Host "Downloading K8s Gallery Image" -ForegroundColor Black -BackgroundColor Green
-        Add-ArcHciK8sGalleryImage -k8sVersion 1.22.11
-
 
 }
 
@@ -110,17 +98,16 @@ function AzLogin {
 
 
 
-
 function  InstallArcRB {
     param()
-    Write-Host "Preparing Azure Arc Resource Bridge Resources for Installation" -ForegroundColor Black -BackgroundColor Green 
+    Write-Host "Preparing Azure Arc Resource Bridge YAML files for Installation" -ForegroundColor Black -BackgroundColor Green 
 	Write-Host $AKSIPPrefix
 	Write-Host $CSV_path
     New-Item -Path $CSV_path -ItemType Directory -Name "ResourceBridge" 
 
 	
     $resource_name= ((Get-AzureStackHci).AzureResourceName) + "-arcbridge" 
-	import-module archci -RequiredVersion 0.2.20    
+	import-module archci -RequiredVersion 0.2.21    
     New-ArcHciConfigFiles -subscriptionID $AzureSubID -location $location -resourceGroup $resbridgeresource_group -resourceName $resource_name -workDirectory $csv_path\ResourceBridge -controlPlaneIP $resbridgecpip -vipPoolStart $resbridgecpip -vipPoolEnd $resbridgecpip -k8snodeippoolstart $resbridgeip1 -k8snodeippoolend $resbridgeip2 -gateway $AKSGWIP -dnsservers $AKSDNSIP -ipaddressprefix $AKSIPPrefix -vswitchName $AKSvSwitchName -vnetName $AKSvnetname
 
     Write-Host "Validating Azure Arc Resource Bridge" -ForegroundColor Black -BackgroundColor Green 
