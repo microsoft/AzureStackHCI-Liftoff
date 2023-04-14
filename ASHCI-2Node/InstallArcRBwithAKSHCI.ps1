@@ -59,16 +59,13 @@ param ()
 
  Write-Host "Installing Required Modules" -ForegroundColor Green -BackgroundColor Black
     
-    $ModuleNames="Az.Resources","Az.Accounts", "AzureAD", "AKSHCI", "Az.keyvault"
+    $ModuleNames="AKSHCI", "Az.keyvault"
     foreach ($ModuleName in $ModuleNames){
         if (!(Get-InstalledModule -Name $ModuleName -ErrorAction Ignore)){
             Install-Module -Name $ModuleName -Force -AcceptLicense 
         }
     }
     Import-Module Az.keyvault
-    Import-Module Az.Accounts
-    Import-Module Az.Resources
-    Import-Module AzureAD
     Import-Module AksHci
     
     
@@ -89,20 +86,20 @@ Write-Host "Prepping AKS Install"
 
 
     
-    Write-Host "Setting AKS Virtual Network on HCI Cluster" -ForegroundColor Black -BackgroundColor Green   
+    Write-Host "Creating AKS Virtual Network on HCI Cluster" -ForegroundColor Black -BackgroundColor Green   
     $vnet = New-AksHciNetworkSetting -name $AKSvnetname -vSwitchName $AKSvSwitchName -k8sNodeIpPoolStart $AKSNodeStartIP -k8sNodeIpPoolEnd $AKSNodeEndIP -vipPoolStart $AKSVIPStartIP -vipPoolEnd $AKSVIPEndIP -ipAddressPrefix $AKSIPPrefix -gateway $AKSGWIP -dnsServers $AKSDNSIP        
 
-    Write-Host "Setting AKS-MOC Configuration" -ForegroundColor Black -BackgroundColor Green 
-    Set-AksHciConfig -imageDir $AKSImagedir -workingDir $AKSWorkingdir -cloudConfigLocation $AKSCloudConfigdir -vnet $vnet -cloudservicecidr $AKSCloudSvcidr
+    Write-Host "Setting AKS&MOC Configuration" -ForegroundColor Black -BackgroundColor Green 
+    Set-AksHciConfig -imageDir $AKSImagedir -workingDir $AKSWorkingdir -cloudConfigLocation $AKSCloudConfigdir -vnet $vnet 
 
     #$azurecred = Connect-AzAccount -ServicePrincipal -Subscription $AzureSubID  -Tenant $AzureTenantID -Credential $azureAppCred
     
     Write-Host $AKSResourceGroupName -ForegroundColor Green -BackgroundColor Black
 
-    Write-Host "Setting AKS Registration in Azure" -ForegroundColor Black -BackgroundColor Green 
+    Write-Host "Registering AKS in Azure for billing" -ForegroundColor Black -BackgroundColor Green 
     Set-AksHciRegistration -subscriptionId $AzureSubID -resourceGroupName $AKSResourceGroupName -Tenant $AzureTenantID -Credential $azurecred
 
-    Write-Host "Ready to Install AKS on HCI Cluster"
+    Write-Host "Ready to Install AKS host on HCI Cluster"
 
     Install-AksHci
 
@@ -148,8 +145,7 @@ az extension remove --name k8s-configuration
 az extension remove --name k8s-extension
 az extension remove --name customlocation
 az extension remove --name azurestackhci
-#az extension add --upgrade --name arcappliance   REMOVED for TEMP WORKAROUDN TO KNOWN BUG 
-az extension add --version 0.2.29 --name arcappliance
+az extension add --upgrade --name arcappliance
 az extension add --upgrade --name connectedk8s
 az extension add --upgrade --name k8s-configuration
 az extension add --upgrade --name k8s-extension
