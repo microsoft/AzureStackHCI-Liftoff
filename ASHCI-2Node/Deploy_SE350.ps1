@@ -6,16 +6,7 @@ param(
 $WelcomeMessage="Welcome to the Azure Stack HCI 2 Node Deployment script, this script will deploy out a fully functional 2 Node Azure Stack HCI Cluster, in a Switchless configuraiton. The first step in this deployment is to ask for you to sign into your Azure Subscription."
 #Begin Function Region
 
-Function Update-Progress 
-{
-    $progressLog[$currentStepIndex] = "$currentStepName = Completed"
-    $progressLog | Out-File -FilePath '.\progress.log' -Encoding utf8 -Force
-    Write-Host "============================================" -ForegroundColor Yellow
-    Write-Host "Completed Step:"(($progressLog[$currentStepIndex]).Split())[0] -ForegroundColor DarkGreen
-    Write-Host "Next Step:"(($progressLog[$currentStepIndex+1]).Split())[0] -ForegroundColor DarkGreen
-
-}
-        
+       
 function LoadVariables {
    
     #Set Variables from Config File
@@ -27,21 +18,18 @@ return $config
 
 function RetrieveCredentials{
 param ()
-$azlogin = Connect-AzAccount -Subscription $config.azuresubid 
-Select-AzSubscription -Subscription $config.AzureSubID
+#$azlogin = Connect-AzAccount -Subscription $config.azuresubid 
+#Select-AzSubscription -Subscription $config.AzureSubID
 #Set AD Domain Cred
-$AzDJoin = Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "DomainJoinerSecret"
-$ADcred = [pscredential]::new("fc\djoin",$AZDJoin.SecretValue)
+#$AzDJoin = Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "DomainJoinerSecret"
+#$ADcred = [pscredential]::new("fc\djoin",$AZDJoin.SecretValue)
+$adcred=Get-Credential -Message "Please enter the credentials for the domain joiner account"
 #$ADpassword = ConvertTo-SecureString "" -AsPlainText -Force
 #$ADCred = New-Object System.Management.Automation.PSCredential ("contoso\djoiner", $ADpassword)
 
-#Set Cred for AAD tenant and subscription
-$AADAccount = "azstackadmin@azurestackdemo1.onmicrosoft.com"
-$AADAdmin=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "azurestackadmin"
-$AADCred = [pscredential]::new("azstackadmin@azurestackdemo1.onmicrosoft.com",$AADAdmin.SecretValue)
-$Arcsecretact=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "ArcSPN"
-$ARCSecret=$arcsecretact.SecretValue
-#$ARCSPN=[pscredential]::new("92ba32da-56d0-449d-b6e3-9d1c64b88a19",$ARCSecret.SecretValue) 
+
+
+
 }
 
 
@@ -83,14 +71,17 @@ function ConfigureNodes {
 
 #Add features, add PS modules, rename, join domain, reboot
 Invoke-Command -ComputerName $ServerList -Credential $ADCred -ScriptBlock {
-    Install-WindowsFeature -Name "BitLocker", "Data-Center-Bridging", "Failover-Clustering", "FS-FileServer", "FS-Data-Deduplication", "Hyper-V", "Hyper-V-PowerShell", "RSAT-AD-Powershell", "RSAT-Clustering-Powershell","FS-Data-Deduplication", "Storage-Replica", "NetworkATC", "System-Insights" -IncludeAllSubFeature -IncludeManagementTools
+    Install-WindowsFeature -Name "BitLocker", "Data-Center-Bridging", "Failover-Clustering", "FS-FileServer", "FS-Data-Deduplication", "Hyper-V", "Hyper-V-PowerShell", "RSAT-AD-Powershell", "RSAT-Clustering-Powershell","FS-Data-Deduplication", "Storage-Replica", "NetworkATC", "System-Insights", "NetworkHUD" -IncludeAllSubFeature -IncludeManagementTools
+    Install-Module -Name PowershellGet -Force -Confirm:$false -SkipPublisherCheck
     Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
     Install-Module -Name Az.StackHCI -Force -All
+    Install-Module -Name test-netstack -Force -All
+    Install-Module -Name Az.StackHCI.NetworkHUD -Force
     Enable-WSManCredSSP -Role Server -Force
     New-NetFirewallRule -DisplayName “ICMPv4” -Direction Inbound -Action Allow -Protocol icmpv4 -Enabled True
     Enable-NetFirewallRule -DisplayGroup “Remote Desktop”
     Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" –Value 0
-    Set-TimeZone -Name "Central Standard Time" 
+    Set-TimeZone -Name "Eastern Standard Time" 
     $ProgressPreference = 'SilentlyContinue'; 
     Invoke-WebRequest -Uri https://aka.ms/installazurecliwindows -OutFile .\AzureCLI.msi; 
     Start-Process msiexec.exe -Wait -ArgumentList '/I AzureCLI.msi /quiet'; rm .\AzureCLI.msi
@@ -112,23 +103,17 @@ Invoke-Command -ComputerName $config.Node01 -Credential $ADCred -ScriptBlock {
 # Configure IP and subnet mask, no default gateway for Storage interfaces
    
     #Rename Net Adapters
-    $m1=Get-NetAdapter -InterfaceDescription "Lom1 Port1"
-    $m2=Get-NetAdapter -InterfaceDescription "Lom1 Port2"
-    $m1 | Rename-NetAdapter -NewName "MGMT1"
-    $m2 | Rename-NetAdapter -NewName "MGMT2"
-    $s1=Get-NetAdapter -InterfaceDescription "Lom2 Port3"
-    $s2=Get-NetAdapter -InterfaceDescription "Lom2 Port4"
-    $s1 | Rename-NetAdapter -NewName "SMB1"
-    $s2 | Rename-NetAdapter -NewName "SMB2"
+    $m1=Get-NetAdapter -Name "Lom1 Port1"
+    $m2=Get-NetAdapter -Name "Lom1 Port2"
+    $m1 | Rename-NetAdapter -NewName "MGMT"
+    $m2 | Rename-NetAdapter -NewName "SMB"
+    
     
     #MGMT
     New-NetIPAddress -InterfaceAlias "MGMT" -IPAddress $using:config.node01_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP  | Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
     
     #Storage 
-    
-    New-NetIPAddress -InterfaceAlias "SMB1" -IPAddress 172.16.0.1 -PrefixLength 24
-    New-NetIPAddress -InterfaceAlias "SMB2" -IPAddress 172.16.1.1 -PrefixLength 24
-    Get-NetAdapter "-Name Ethernet *"| Disable-NetAdapter -Confirm:$false
+    Get-NetAdapter -Name "Ethernet *"| Disable-NetAdapter -Confirm:$false
 }
 }
 
@@ -138,83 +123,23 @@ function ConfigureNode02 {
 
 Invoke-Command -ComputerName $config.Node02 -Credential $ADCred -ScriptBlock {
     # Configure IP and subnet mask, no default gateway for Storage interfaces
-    
+   
     #Rename Net Adapters
-    $m1=Get-NetAdapter -InterfaceDescription "Lom1 Port1"
-    $m2=Get-NetAdapter -InterfaceDescription "Lom1 Port2"
-    $m1 | Rename-NetAdapter -NewName "MGMT1"
-    $m2 | Rename-NetAdapter -NewName "MGMT2"
-    $s1=Get-NetAdapter -InterfaceDescription "Lom2 Port3"
-    $s2=Get-NetAdapter -InterfaceDescription "Lom2 Port4"
-    $s1 | Rename-NetAdapter -NewName "SMB1"
-    $s2 | Rename-NetAdapter -NewName "SMB2"
+    $m1=Get-NetAdapter -Name "Lom1 Port1"
+    $m2=Get-NetAdapter -Name "Lom1 Port2"
+    $m1 | Rename-NetAdapter -NewName "MGMT"
+    $m2 | Rename-NetAdapter -NewName "SMB"
     
     
     #MGMT
-    New-NetIPAddress -InterfaceAlias "MGMT" -IPAddress $using:config.node02_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP| Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
+    New-NetIPAddress -InterfaceAlias "MGMT" -IPAddress $using:config.node01_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP  | Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
     
     #Storage 
-    New-NetIPAddress -InterfaceAlias "SMB1" -IPAddress 172.16.0.2 -PrefixLength 24
-    New-NetIPAddress -InterfaceAlias "SMB2" -IPAddress 172.16.1.2 -PrefixLength 24
-    Get-NetAdapter -Name "Ethernet *" | Disable-NetAdapter -Confirm:$false
+    Get-NetAdapter -Name "Ethernet *"| Disable-NetAdapter -Confirm:$false
 }
 }
 
-function ConfigureNode03 {
-    param ()
-    Write-Host -ForegroundColor Green -Object "Configure Node03"
 
-Invoke-Command -ComputerName $config.node03 -Credential $ADCred -ScriptBlock {
-    # Configure IP and subnet mask, no default gateway for Storage interfaces
-    
-    #Rename Net Adapters
-    $m1=Get-NetAdapter -InterfaceDescription "Lom1 Port1"
-    $m2=Get-NetAdapter -InterfaceDescription "Lom1 Port2"
-    $m1 | Rename-NetAdapter -NewName "MGMT1"
-    $m2 | Rename-NetAdapter -NewName "MGMT2"
-    $s1=Get-NetAdapter -InterfaceDescription "Lom2 Port3"
-    $s2=Get-NetAdapter -InterfaceDescription "Lom2 Port4"
-    $s1 | Rename-NetAdapter -NewName "SMB1"
-    $s2 | Rename-NetAdapter -NewName "SMB2"
-    
-    
-    #MGMT
-    New-NetIPAddress -InterfaceAlias "MGMT" -IPAddress $using:config.node02_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP| Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
-    
-    #Storage 
-    New-NetIPAddress -InterfaceAlias "SMB1" -IPAddress 172.16.0.2 -PrefixLength 24
-    New-NetIPAddress -InterfaceAlias "SMB2" -IPAddress 172.16.1.2 -PrefixLength 24
-    Get-NetAdapter -Name "Ethernet *" | Disable-NetAdapter -Confirm:$false
-}
-}
-
-function ConfigureNode04 {
-    param ()
-    Write-Host -ForegroundColor Green -Object "Configure Node04"
-
-Invoke-Command -ComputerName $config.Node04 -Credential $ADCred -ScriptBlock {
-    # Configure IP and subnet mask, no default gateway for Storage interfaces
-    
-    #Rename Net Adapters
-    $m1=Get-NetAdapter -InterfaceDescription "Lom1 Port1"
-    $m2=Get-NetAdapter -InterfaceDescription "Lom1 Port2"
-    $m1 | Rename-NetAdapter -NewName "MGMT1"
-    $m2 | Rename-NetAdapter -NewName "MGMT2"
-    $s1=Get-NetAdapter -InterfaceDescription "Lom2 Port3"
-    $s2=Get-NetAdapter -InterfaceDescription "Lom2 Port4"
-    $s1 | Rename-NetAdapter -NewName "SMB1"
-    $s2 | Rename-NetAdapter -NewName "SMB2"
-    
-    
-    #MGMT
-    New-NetIPAddress -InterfaceAlias "MGMT" -IPAddress $using:config.node02_MgmtIP -PrefixLength 24 -DefaultGateway $using:config.GWIP| Set-DnsClientServerAddress -ServerAddresses $using:config.DNSIP
-    
-    #Storage 
-    New-NetIPAddress -InterfaceAlias "SMB1" -IPAddress 172.16.0.2 -PrefixLength 24
-    New-NetIPAddress -InterfaceAlias "SMB2" -IPAddress 172.16.1.2 -PrefixLength 24
-    Get-NetAdapter -Name "Ethernet *" | Disable-NetAdapter -Confirm:$false
-}
-}
 
 function PrepareStorage {
     param ()
@@ -238,6 +163,7 @@ Invoke-Command ($ServerList) {
 } | Sort -Property PsComputerName, Count
 }
 
+
 function CreateCluster {
     param ()
     Write-Host -ForegroundColor Green -Object "Creating the Cluster"
@@ -251,143 +177,101 @@ New-Cluster -Name $using:config.ClusterName -Node $using:config.Node01, $using:c
 Start-Sleep 30
 Clear-DnsClientCache
 
-# Update the cluster network names that were created by default.  First, look at what's there
-Get-ClusterNetwork -Cluster $using:config.ClusterName  | ft Name, Role, Address
-
-# Change the cluster network names so they are consistent with the individual nodes
-(Get-ClusterNetwork -Cluster $using:config.ClusterName  | where-object address -like "172.16.0.0").Name = "Storage1"
-(Get-ClusterNetwork -Cluster $using:config.ClusterName  | where-object address -like "172.16.1.0").Name = "Storage2"
-#(Get-ClusterNetwork -Cluster $using:config.ClusterName  | where-object address -like "").Name = "OOB"
-(Get-ClusterNetwork -Cluster $using:config.ClusterName  | where-object address -like $using:config.MGMTSubnet).Name = "MGMT"
-
-# Check to make sure the cluster network names were changed correctly
-Get-ClusterNetwork -Cluster $config.ClusterName | ft Name, Role, Address
 }
 
 }
 
-function SetLiveMigration {
-    param()
-    Write-Host -ForegroundColor Green -Object "Set Cluster Live Migration Settings"
-
-#Set Cluster Live Migration Settings 
-Enable-VMMigration -ComputerName $ServerList
-Add-VMMigrationNetwork -computername $ServerList -Subnet 172.16.0.0/24 -Priority 1 
-Add-VMMigrationNetwork -computername $ServerList -Subnet 172.16.1.0/24 -Priority 2 
-Set-VMHost -ComputerName $ServerList -MaximumStorageMigrations 2 -MaximumVirtualMachineMigrations 2 -VirtualMachineMigrationPerformanceOption SMB -UseAnyNetworkForMigration $false 
-
-}
 
 function DeployS2D {
     param ()
     Write-Host -ForegroundColor Green -Object "Enable Storage Spaces Direct"
 
 #Enable S2D
-Enable-ClusterStorageSpacesDirect  -CimSession $config.ClusterName -PoolFriendlyName $config.StoragePoolName -Confirm:0 
-
+Invoke-Command -ComputerName $config.node01 -Credential $adcred -Authentication Credssp -ScriptBlock {
+    Enable-ClusterStorageSpacesDirect -PoolFriendlyName $using:config.StoragePoolName -Confirm:0 
 }
+    }
 
 function EnableCAU {
 param()
 #############Enable CAU and update to latest 21H2 bits...###############
-#First we must add the AD cluster object to the Cluster Objects AD Group
-$ADClusterObj = $config.ClusterName + "$"
-Add-ADGroupMember -Identity ClusterObjects -Members $ADClusterObj
-#Now we can add the CAU role...
-Add-CauClusterRole -ClusterName $config.ClusterName -MaxFailedNodes 0 -RequireAllNodesOnline -EnableFirewallRules -Force -CauPluginName Microsoft.WindowsUpdatePlugin -MaxRetriesPerNode 3 -CauPluginArguments @{ 'IncludeRecommendedUpdates' = 'False' } -StartDate "3/2/2017 3:00:00 AM" -DaysOfWeek 4 -WeeksOfMonth @(3) -verbose
+Invoke-Command -ComputerName $config.node01 -Credential $adcred -Authentication Credssp -ScriptBlock {
+   
+    #Now we can add the CAU role...
+    Add-CauClusterRole -ClusterName $using:config.ClusterName -MaxFailedNodes 0 -RequireAllNodesOnline -EnableFirewallRules -VirtualComputerObjectName "$using:config.ClusterName"+"-CAU"  -Force -CauPluginName Microsoft.WindowsUpdatePlugin -MaxRetriesPerNode 3 -CauPluginArguments @{ 'IncludeRecommendedUpdates' = 'False' } -StartDate "3/2/2020 3:00:00 AM" -DaysOfWeek 4 -WeeksOfMonth @(3) -verbose
 
+    #Enable KSR on ALl and Future CAU 
+    Get-Cluster -Name $using:config.ClusterName | Set-ClusterParameter -Name CauEnableSoftReboot -Value 1 -Create
 
-#Enable KSR on ALl and Future CAU 
-Get-Cluster -Name $config.ClusterName | Set-ClusterParameter -Name CauEnableSoftReboot -Value 1 -Create
-
-#Now we can force an update...
-Invoke-CauRun -ClusterName $config.ClusterName -CauPluginName "Microsoft.WindowsUpdatePlugin" -MaxFailedNodes 1 -MaxRetriesPerNode 3 -RequireAllNodesOnline -Force
-
-
+    #Now we can force an update...
+    Invoke-CauRun -ClusterName $using:config.ClusterName -CauPluginName "Microsoft.WindowsUpdatePlugin" -MaxFailedNodes 1 -MaxRetriesPerNode 3 -RequireAllNodesOnline -Force
 }
 
-function ConfirmFunctionLevels {
-    param ()
-    #Update Cluster Function Level
-
-$cfl=Get-Cluster -Name $config.ClusterName 
-if ($cfl.ClusterFunctionalLevel -lt "11") {
-write-host -ForegroundColor yellow -Object "Cluster Functional Level needs to be upgraded"  
-
-Update-ClusterFunctionalLevel -Cluster $config.ClusterName -Verbose -Force
-}
-
-else {
-write-host -ForegroundColor Green -Object "Cluster Functional Level is good"
-
-}
-
-#storage Pool Level check and upgrade
-
-$spl=Get-StoragePool -CimSession $config.ClusterName -FriendlyName $config.StoragePoolName
- 
-if ($spl.version -ne "Windows Server 2022") {
-write-host -ForegroundColor yellow -Object "Storage Pool Level needs to be upgraded"
-
-Update-StoragePool -FriendlyName $config.StoragePoolName -Confirm:0 -CimSession $config.Node01
-}
-else {
-write-host -ForegroundColor Green -Object "Storage Pool level is set to Windows Server 2022"
-}
-    
-}
+    }
 
 function CreateCSV {
     param ()
     write-host -ForegroundColor Green -Object "Creating Cluster Shared Volume"
 
 #Create S2D Tier and Volumes
-New-StorageTier -StoragePoolFriendlyName $config.StoragePoolName -FriendlyName 2WayNestedMirror -ResiliencySettingName Mirror -MediaType SSD -NumberOfDataCopies 4 -CimSession $config.ClusterName ;
+Invoke-Command -ComputerName $config.node01 -Credential $adcred -Authentication Credssp -ScriptBlock {
+    New-Volume -StoragePoolFriendlyName $using:config.StoragePoolName -FriendlyName $using:config.CSVFriendlyname -Size $using:config.CSVSize 
+} 
 
-New-Volume -StoragePoolFriendlyName $config.StoragePoolName -FriendlyName Volume01 -StorageTierFriendlyNames 2WayNestedMirror -StorageTierSizes $config.CSVSize -CimSession $config.ClusterName 
- 
-
-}
+    }
 
 function CreateCloudWitness{
     param()
     write-host -ForegroundColor Green -Object "Set Cloud Witness"
 
 #Set Cloud Witness
-
-Set-ClusterQuorum -Cluster $config.ClusterName -CloudWitness -AccountName $config.CloudWitnessShare  -AccessKey $Config.CloudWitnessKey
-
+Invoke-Command -ComputerName $config.node01 -Credential $adcred -Authentication Credssp -ScriptBlock {
+    Set-ClusterQuorum -Cluster $using:config.ClusterName -CloudWitness -AccountName $using:config.CloudWitnessShare  -AccessKey $using:Config.CloudWitnessKey
 }
+    }
 
 function SetNetIntents {
     param()
     write-host -ForegroundColor Green -Object "Setting NetworkATC Configuration"
 
-Invoke-Command -ComputerName $ServerList -Credential $ADcred -Authentication Credssp {
+Invoke-Command -ComputerName $config.node01 -Credential $ADcred -Authentication Credssp {
 
-#North-South Net-Intents
+#Network Intents
 #New-VMSwitch -Name "HCI" -AllowManagementOS $true -EnableEmbeddedTeaming $true -MinimumBandwidthMode Weight -NetAdapterName "MGMT1", "MGMT2"
-Add-NetIntent -ClusterName $using:config.ClusterName -AdapterName "MGMT1", "MGMT2"  -Name HCI -Management -Compute 
+#North-South Intent
+Add-NetIntent -ClusterName $using:config.ClusterName -AdapterName "MGMT"  -Name HCIVS -Management -Compute 
+
+#Storage Intent
+#$smb=New-NetIntentGlobalClusterOverrides
+#$smb.VirtualMachineMigrationPerformanceOption="SMB"
+#$smb.EnableVirtualMachineMigrationPerformanceSelection=$false
+Add-NetIntent -Name "SMB" -AdapterName "SMB" -Storage 
+#-GlobalClusterOverrides $smb
 }
 
-Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp {
-#Storage NetIntent
-Add-NetIntent -ClusterName $using:config.ClusterName -AdapterName "SMB1", "SMB2"  -Name SMB -Storage
-}
+
+
 
 }
 
 function registerhcicluster {
 param()
-write-host -ForegroundColor Green -Object "Register the Cluster to Azure Subscription"
+$clstate=monitorclusterstate
+if ($clstate="Online") {
+    write-host -ForegroundColor Green -Object "Register the Cluster to Azure Subscription"
 
 #Register Cluster with Azure
 Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp {
-    Connect-AzAccount -Credential $using:AADCred -TenantId $azuretenentid
-    $armtoken = Get-AzAccessToken
-    $graphtoken = Get-AzAccessToken -ResourceTypeName AadGraph
-    Register-AzStackHCI -SubscriptionId $using:config.AzureSubID -ComputerName $using:config.Node01 -AccountId $using:AADAccount -ArmAccessToken $armtoken.Token -GraphAccessToken $graphtoken.Token  -Region "East US" 
+    Install-Module Az.Resources -Force -MinimumVersion "2.6.0"
+    Install-Module Az.StackHCI -Force -MinimumVersion "2.0.0"
+    Register-AzStackHCI -SubscriptionId $using:config.AzureSubID -ComputerName $using:config.Node01   -Region "East US" -UseDeviceAuthentication -ResourceName $using:config.ClusterName -ResourceGroupName $using:config.ClusterName
     }
+}
+else {
+     monitorclusterstate
+}
+
+
 
 }
 
@@ -396,9 +280,16 @@ param ()
 
 New-Item -Path \\$($config.Node01)\c$ -Name Temp -ItemType Directory
 
-Copy-Item C:\Scripts\FourthCoffee\InstallArcRB.ps1 -Destination \\$($config.Node01)\C$\temp
+Copy-Item C:\Scripts\InstallArcRB.ps1 -Destination \\$($config.Node01)\C$\temp
 }
 
+function copyMOCRBInstall {
+    param ()
+    
+    New-Item -Path \\$($config.Node01)\c$ -Name Temp -ItemType Directory
+    
+    Copy-Item C:\Deployment\InstallMocRB.ps1 -Destination \\$($config.Node01)\C$\temp
+    }
 function runAKSRBInstall{
 param (
 $remotevar=@{ 
@@ -591,30 +482,30 @@ $remotevar=@{
         Write-Host "Logging into Azure" -ForegroundColor Green -BackgroundColor Black
 
         az login --use-device-code --tenant $azuretenantid
+        az account set --subscription $subscription
         az config set extension.use_dynamic_install=yes_without_prompt
 
-        Install-Module -Name ArcHci -RequiredVersion 0.2.18
+        Install-Module -Name ArcHci -Repository PSGallery -AcceptLicense -Force -RequiredVersion 0.2.24
 
         $hciClusterId= (Get-AzureStackHci).AzureResourceUri
         $resource_name= ((Get-AzureStackHci).AzureResourceName) + "-arcbridge"
-       
+        $operatorname = "hci-vmoperator"
+        $aksoperatorname ="hci-aksoperators"
 
       #Create VM Operator Extension
-      az k8s-extension create --cluster-type appliances --cluster-name $resource_name --resource-group $resource_group --name hci-vmoperator --extension-type Microsoft.AZStackHCI.Operator --scope cluster --release-namespace helm-operator2 --configuration-settings Microsoft.CustomLocation.ServiceAccount=hci-vmoperator --config-protected-file $csv_path\ResourceBridge\hci-config.json --configuration-settings HCIClusterID=$hciClusterId --auto-upgrade true
-
+      az k8s-extension create --cluster-type appliances --cluster-name $resource_name --resource-group $resource_group --name $operatorname --extension-type Microsoft.AZStackHCI.Operator --scope cluster --release-namespace helm-operator2 --configuration-settings Microsoft.CustomLocation.ServiceAccount=hci-vmoperator --config-protected-file $csv_path\ResourceBridge\hci-config.json --configuration-settings HCIClusterID=$hciClusterId --auto-upgrade true
+      
+      az k8s-extension delete --cluster-type appliances --cluster-name $resource_name --resource-group $resource_group --name hci-aksoperator
       #Create AKS-Hybrid Extension
-      az k8s-extension create -g $resource_group -c $resource_name --cluster-type appliances --name hci-aksoperator --extension-type Microsoft.HybridAKSOperator --config Microsoft.CustomLocation.ServiceAccount=hci-vmoperator --version "0.1.101-onebranch-official" --release-train "staging" 
-   
+      az k8s-extension create -g $resource_Group  -c $resource_name --cluster-type appliances --name $aksoperatorname --extension-type Microsoft.HybridAKSOperator --config Microsoft.CustomLocation.ServiceAccount="default"
       #Get Applicance Extension Detail
       $applianceID=(az arcappliance show -g $resource_group  -n $resource_name --query id -o tsv)
-       
-      $operatorname = "hci-vmoperator"
       
       #VM Operator Extension ID
       $extensionID=(az k8s-extension show -g $resource_group  -c $resource_name --cluster-type appliances --name $operatorname --query id -o tsv)
       
       #AKS Hybrid Extension ID
-      $ClusterExtensionResourceId=az k8s-extension show -g $resource_group -c $resource_name --cluster-type appliances --name hci-aksoperator --query id -o tsv
+      $ClusterExtensionResourceId=az k8s-extension show -g $resource_group -c $resource_name --cluster-type appliances --name $aksoperatorname --query id -o tsv
 
 
       #Create Custom Location with VM Operator
@@ -647,19 +538,123 @@ $remotevar=@{
       az azurestackhci image create --subscription $subscription --resource-group $resource_group --extended-location name=$customLocationID type="CustomLocation" --location $Location --name "Server22AECore"  --os-type $osType --offer "windowsserver" --publisher "microsoftwindowsserver" --sku "2022-datacenter-azure-edition-core" --version "20348.707.220609"
 
       #AKS-Hybrid Create AKS Virtual Network
-   
-
-      New-KvaVirtualNetwork -name $akshybrid_virtualnetwork -vswitchname "$vSwitchName" -ipaddressprefix $akshybrid_ipaddressprefix  -gateway $akshybrid_gateway -dnsservers $akshybrid_dns -vippoolstart $akshybrid_vippoolstart -vippoolend $akshybrid_vippoolend -k8snodeippoolstart $akshybrid_k8snodeippoolstart -k8snodeippoolend $akshybrid_k8snodeippoolend -kubeconfig $csv_path\ResourceBridge\config\ -vLanID 42
-      
+      New-ArcHciVirtualNetwork -name $akshybrid_virtualnetwork -vswitchName "$vSwitchName" -ipaddressprefix $akshybrid_ipaddressprefix -gateway $akshybrid_gateway -dnsservers $akshybrid_dns -vippoolstart $akshybrid_vippoolstart -vippoolend $akshybrid_vippoolend -k8snodeippoolstart $akshybrid_k8snodeippoolstart -k8snodeippoolend $akshybrid_k8snodeippoolend 
       az hybridaks vnet create --name $akshybrid_virtualnetwork --resource-group $resource_group --custom-location $customlocname --moc-vnet-name $akshybrid_virtualnetwork
       
       #AKS-Hybrid Download Mariner Images
-      Add-ArcHciK8sGalleryImage -k8sVersion 1.22.11
+      Add-ArcHciK8sGalleryImage -k8sVersion 1.22.11 -version 1.0.16.10113
 
     }
 
 }
+function removecustomlocation{
+    param($remotevar=@{
+                AzureSPNAppID= $config.AzureSPNAppID 
+                AzureSPNSecret= $config.AzureSPNSecret 
+                AzureTenantID= $config.AzureTenantID  
+                resource_group=$config.resbridgeresource_group
+                subscription=$config.AzureSubID
+                Location=$config.Location
+                customloc_name=$config.customloc_name
+                vSwitchName=$config.AKSvSwitchName
+                csv_path=$config.csv_path
+                akshybrid_virtualnetwork=$config.akshybrid_virtualnetwork
+                akshybrid_ipaddressprefix=$config.akshybrid_ipaddressprefix
+                akshybrid_gateway=$config.akshybrid_gateway
+                akshybrid_dns=$config.akshybrid_dns
+                akshybrid_vippoolstart=$config.akshybrid_vippoolstart
+                akshybrid_vippoolend=$config.akshybrid_vippoolstart
+                akshybrid_k8snodeippoolstart=$config.akshybrid_k8snodeippoolstart
+                akshybrid_k8snodeippoolend=$config.akshybrid_k8snodeippoolstart
+                vmss_vnetname=$config.vmss_vnetname
+                }
+        )
 
+    Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp -ArgumentList $remotevar -ScriptBlock {
+
+         param (
+        $RemoteVar
+        )
+        
+
+                $AzureSPNAppID= $remotevar.AzureSPNAppID 
+                $AzureSPNSecret= $remotevar.AzureSPNSecret 
+                $AzureTenantID= $remotevar.AzureTenantID
+                $resource_group=$remotevar.resource_group
+                $subscription=$remotevar.subscription
+                $Location=$remotevar.Location
+                $customlocname=$remotevar.customloc_name
+                $vSwitchName=$RemoteVar.vSwitchName
+                $csv_path=$remotevar.csv_path
+                $vmss_vnetname=$remotevar.vmss_vnetname
+                $akshybrid_virtualnetwork=$remotevar.akshybrid_virtualnetwork
+                $akshybrid_ipaddressprefix=$remotevar.akshybrid_ipaddressprefix
+                $akshybrid_gateway=$remotevar.akshybrid_gateway
+                $akshybrid_dns=$remotevar.akshybrid_dns
+                $akshybrid_vippoolstart=$remotevar.akshybrid_vippoolstart
+                $akshybrid_vippoolend=$remotevar.akshybrid_vippoolend
+                $akshybrid_k8snodeippoolstart=$remotevar.akshybrid_k8snodeippoolstart
+                $akshybrid_k8snodeippoolend=$remotevar.akshybrid_k8snodeippoolend
+
+        Write-Host "Logging into Azure" -ForegroundColor Green -BackgroundColor Black
+
+        az login --use-device-code --tenant $azuretenantid
+        az account set --subscription $subscription
+        az config set extension.use_dynamic_install=yes_without_prompt
+
+        Install-Module -Name ArcHci -Repository PSGallery -AcceptLicense -Force -RequiredVersion 0.2.24
+
+        $hciClusterId= (Get-AzureStackHci).AzureResourceUri
+        $resource_name= ((Get-AzureStackHci).AzureResourceName) + "-arcbridge"
+        $operatorname = "hci-vmoperator"
+        $aksoperatorname ="hci-aksoperators"
+
+      #Delete AKS Hybrid Network
+      az hybridaks vnet delete --resource-group $resource_group --name $akshybrid_virtualnetwork
+      Remove-MocVirtualNetwork -group "target-group" -name $akshybrid_virtualnetwork
+      
+      #Delete AKS Images
+    #  Remove-ArcHciK8sGalleryImage -k8sVersion 1.22.11 -version 1.0.16.10113
+
+      #Delete VM Operator Virtual Network
+      az azurestackhci virtualnetwork delete --subscription $subscription --resource-group $resource_group --name $vnetName  --yes
+      New-MocVirtualNetwork -name "$vnetName" -group "Default_Group"
+
+      #Delete VM Gallery Image
+      az azurestackhci galleryimage delete --subscription $subscription --resource-group $resource_group --name "Server22AECore"
+ 
+      #Remove Custom  Location
+      az customlocation delete --resource-group $resource_group --name $customlocname --yes
+      az k8s-extension delete --cluster-type appliances --cluster-name $resource_name --resource-group $resource_group --name $aksoperatorname --yes
+      az k8s-extension delete --cluster-type appliances --cluster-name $resource_name --resource-group $resource_group --name $operatorname --yes
+    }
+
+}
+function monitorclusterstate {
+    param ()
+    $clusterstate=Get-ClusterResource -Name "Cluster IP Address" -Cluster $config.ClusterName 
+  
+  if ($clusterstate.State -ne "online" ) {
+    Write-Host "Cluster is not ready yet, starting resources" -ForegroundColor Green -BackgroundColor Black
+    Get-ClusterResource -Name "Cluster IP Address" | start-Clusterresource 
+  }
+  
+    elseif ($clusterstate.State -eq "online" ) {
+        Write-Host "Cluster is  ready" -ForegroundColor Green -BackgroundColor Black
+    }
+
+}
+
+function checkresourcegroup {
+    param()
+$resourcegroup=Get-AzResourceGroup -Name $config.resbridgeresource_group -Location $config.Location
+if ($resourcegroup.provisioningstate -eq "Succeeded") {
+    Write-Host "Resource Group has been pre-created" -ForegroundColor Black -BackgroundColor Green
+} 
+elseif ($resourcegroup.provisioningstate -ne "Succeeded") {
+    New-AzResourceGroup -Name $config.resbridgeresource_group -Location $config.Location
+}   
+}
 
 
 
@@ -671,52 +666,33 @@ $remotevar=@{
 
 
 $config=LoadVariables
-$ServerList = $config.Node01, $config.Node02, $config.node03, $config.Node04
+$ServerList = $config.Node01, $config.Node02
 
-$azlogin = Connect-AzAccount -Subscription $config.azuresubid 
-Select-AzSubscription -Subscription $config.AzureSubID
-#Set AD Domain Cred
-$AzDJoin = Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name ""
-$ADcred = [pscredential]::new("",$AZDJoin.SecretValue)
-#$ADpassword = ConvertTo-SecureString "" -AsPlainText -Force
-#$ADCred = New-Object System.Management.Automation.PSCredential ("contoso\djoiner", $ADpassword)
 
-#Set Cred for AAD tenant and subscription
-$AADAccount = ""
-$AADAdmin=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name ""
-$AADCred = [pscredential]::new("",$AADAdmin.SecretValue)
-$Arcsecretact=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name ""
-$ARCSecret=$arcsecretact.SecretValue
 
+RetrieveCredentials
 ConfigureWorkstation
 ConfigureNodes
 ConfigureNode01
 ConfigureNode02
-ConfigureNode03
-ConfigureNode04
 PrepareStorage
 CreateCluster
-SetLiveMigration
 DeployS2D
 EnableCAU
-ConfirmFunctionLevels
 CreateCSV
 CreateCloudWitness
 SetNetintents
-
 registerhcicluster
-copyAKSRBInstall
-runAKSRBInstall
-
+#copyAKSRBInstall
+#runAKSRBInstall
+copyMOCRBInstall
+checkresourcegroup
+runMocRBInstall
 addcustomlocation
 
 
 
 
-    
-    
-    
-    
     
     
     

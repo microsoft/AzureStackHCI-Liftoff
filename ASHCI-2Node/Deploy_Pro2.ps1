@@ -30,18 +30,8 @@ param ()
 $azlogin = Connect-AzAccount -Subscription $config.azuresubid 
 Select-AzSubscription -Subscription $config.AzureSubID
 #Set AD Domain Cred
-$AzDJoin = Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "DomainJoinerSecret"
 $ADcred = [pscredential]::new("fc\djoin",$AZDJoin.SecretValue)
-#$ADpassword = ConvertTo-SecureString "" -AsPlainText -Force
-#$ADCred = New-Object System.Management.Automation.PSCredential ("contoso\djoiner", $ADpassword)
 
-#Set Cred for AAD tenant and subscription
-$AADAccount = "azstackadmin@azurestackdemo1.onmicrosoft.com"
-$AADAdmin=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "azurestackadmin"
-$AADCred = [pscredential]::new("azstackadmin@azurestackdemo1.onmicrosoft.com",$AADAdmin.SecretValue)
-$Arcsecretact=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "ArcSPN"
-$ARCSecret=$arcsecretact.SecretValue
-#$ARCSPN=[pscredential]::new("92ba32da-56d0-449d-b6e3-9d1c64b88a19",$ARCSecret.SecretValue) 
 }
 
 
@@ -83,7 +73,7 @@ function ConfigureNodes {
 
 #Add features, add PS modules, rename, join domain, reboot
 Invoke-Command -ComputerName $ServerList -Credential $ADCred -ScriptBlock {
-    Install-WindowsFeature -Name "BitLocker", "Data-Center-Bridging", "Failover-Clustering", "FS-FileServer", "FS-Data-Deduplication", "Hyper-V", "Hyper-V-PowerShell", "RSAT-AD-Powershell", "RSAT-Clustering-Powershell","FS-Data-Deduplication", "Storage-Replica", "NetworkATC", "System-Insights" -IncludeAllSubFeature -IncludeManagementTools
+    Install-WindowsFeature -Name "BitLocker", "Data-Center-Bridging", "Failover-Clustering", "FS-FileServer", "FS-Data-Deduplication", "Hyper-V", "Hyper-V-PowerShell", "RSAT-AD-Powershell", "RSAT-Clustering-Powershell","FS-Data-Deduplication", "Storage-Replica", "NetworkATC", "System-Insights", "NetworkHUD" -IncludeAllSubFeature -IncludeManagementTools
     Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
     Install-Module -Name Az.StackHCI -Force -All
     Enable-WSManCredSSP -Role Server -Force
@@ -347,462 +337,499 @@ Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication 
 Add-NetIntent -ClusterName $using:config.ClusterName -AdapterName "SMB1", "SMB2"  -Name SMB -Storage
 }
 
-<#
-start-sleep 30 
-
-Start-ClusterResource -Cluster $config.ClusterName -Name "Cluster IP Address"
-
-write-host -ForegroundColor Green -Object "Testing to ensure Cluster IP is online" 
-
-$tnc_clip=Test-NetConnection $config.ClusterIP
-if ($tnc_clip.pingsucceded -eq "true") {
-    write-host -ForegroundColor Green -Object "Cluster in online, NetworkATC was successful"
-}
-
-elseif ($tnc_clip.pingsucceded -eq "false") {
-    Start-ClusterResource -Cluster $config.ClusterName -Name Cluster IP Address
-   Start-Sleep 15
-}
- 
- $tnc_clip2=Test-NetConnection $config.ClusterIP
-
-if ( $tnc_clip2.pingsucceded -eq "true") {
-
-write-host -ForegroundColor Green -Object "Cluster in online, NetworkATC was successful"
-}
-
-else {
-
-Write-Host -ForegroundColor Red -Object "Please ensure Cluster Resources are online and Network configration is correct on nodes";
-
-    Start-Sleep 180
-}
-#>
 }
 
 function registerhcicluster {
-param()
-write-host -ForegroundColor Green -Object "Register the Cluster to Azure Subscription"
-
-#Register Cluster with Azure
-
-#Register Cluster with Azure
-Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp {
-    Connect-AzAccount -Credential $using:AADCred -TenantId $azuretenentid
-    $armtoken = Get-AzAccessToken
-    $graphtoken = Get-AzAccessToken -ResourceTypeName AadGraph
-    Register-AzStackHCI -SubscriptionId $using:config.AzureSubID -ComputerName $using:config.Node01 -AccountId $using:AADAccount -ArmAccessToken $armtoken.Token -GraphAccessToken $graphtoken.Token  -Region "East US" 
+    param()
+    $clstate=monitorclusterstate
+    if ($clstate="Online") {
+        write-host -ForegroundColor Green -Object "Register the Cluster to Azure Subscription"
+    
+    #Register Cluster with Azure
+    Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp {
+        Install-Module Az.Resources -Force -MinimumVersion "2.6.0"
+        Install-Module Az.StackHCI -Force -MinimumVersion "2.0.0"
+        Register-AzStackHCI -SubscriptionId $using:config.AzureSubID -ComputerName $using:config.Node01   -Region "East US" -UseDeviceAuthentication -ResourceName $using:config.ClusterName -ResourceGroupName $using:config.ClusterName
+        }
     }
-
-}
-
-function copyAKSRBInstall {
-param ()
-
-New-Item -Path \\$($config.Node01)\c$ -Name Temp -ItemType Directory
-
-Copy-Item C:\Scripts\FourthCoffee\InstallArcRB.ps1 -Destination \\$($config.Node01)\C$\temp
-}
-
-function runAKSRBInstall{
-param (
-$remotevar=@{ 
-                AzureSubId = $config.AzureSubID 
-                AzureSPNAppID= $config.AzureSPNAppID 
-                AzureSPNSecret= $config.AzureSPNSecret 
-                AzureTenantID= $config.AzureTenantID 
-                KeyVault= $config.KeyVault
-                AKSvnetname= $config.AKSvnetname
-                AKSvSwitchName =$config.AKSvSwitchName
-                AKSNodeStartIP= $config.AKSNodeStartIP
-                AKSNodeEndIP= $config.AKSNodeEndIP
-                AKSVIPStartIP =$config.AKSVIPStartIP
-                AKSVIPEndIP= $config.AKSVIPEndIP
-                AKSIPPrefix =$config.AKSIPPrefix
-                AKSGWIP =$config.AKSGWIP
-                AKSDNSIP= $config.AKSDNSIP
-                AKSImagedir =$config.AKSImagedir
-                AKSWorkingdir =$config.AKSWorkingdir
-                AKSCloudSvcidr =$config.AKSCloudSvcidr
-                AKSResourceGroupName= $config.AKSResourceGroupName
-                Location= $config.Location
-                resbridgeresource_group= $config.resbridgeresource_group
-                resbridgeip1= $config.resbridgeip1
-                resbridgeip2= $config.resbridgeip2
-                resbridgecpip= $config.resbridgecpip
-                csv_path=$config.csv_path
-                }
-          )
-    Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp -ArgumentList $remotevar -ScriptBlock {
-        param (
-        $RemoteVar
-        )
-
-
-        
-                $AzureSubId = $remotevar.AzureSubID 
-                $AzureSPNAppID= $remotevar.AzureSPNAppID 
-                $AzureSPNSecret= $remotevar.AzureSPNSecret 
-                $AzureTenantID= $remotevar.AzureTenantID 
-                $KeyVault= $remotevar.KeyVault
-                $AKSvnetname= $remotevar.AKSvnetname
-                $AKSvSwitchName =$remotevar.AKSvSwitchName
-                $AKSNodeStartIP= $remotevar.AKSNodeStartIP
-                $AKSNodeEndIP= $remotevar.AKSNodeEndIP
-                $AKSVIPStartIP =$remotevar.AKSVIPStartIP
-                $AKSVIPEndIP= $remotevar.AKSVIPEndIP
-                $AKSIPPrefix =$remotevar.AKSIPPrefix
-                $AKSGWIP =$remotevar.AKSGWIP
-                $AKSDNSIP= $remotevar.AKSDNSIP
-                $AKSImagedir =$remotevar.AKSImagedir
-                $AKSWorkingdir =$remotevar.AKSWorkingdir
-                $AKSCloudSvcidr =$remotevar.AKSCloudSvcidr
-                $AKSResourceGroupName= $remotevar.AKSResourceGroupName
-                $Location= $remotevar.Location
-                $resbridgeresource_group= $remotevar.resbridgeresource_group
-                $resbridgeip1= $remotevar.resbridgeip1
-                $resbridgeip2= $remotevar.resbridgeip2
-                $resbridgecpip= $remotevar.resbridgecpip
-                $csv_path=$RemoteVar.csv_path
-        
-               
-        
-      C:\temp\InstallArcRB.ps1 -AzureSubId $AzureSubID -AzureSPNAppID $AzureSPNAppID -AzureSPNSecret $AzureSPNSecret -AzureTenantID $AzureTenantID -KeyVault $KeyVault -AKSvnetname $AKSvnetname -AKSvSwitchName $AKSvSwitchName -AKSNodeStartIP $AKSNodeStartIP -AKSNodeEndIP $AKSNodeEndIP -AKSVIPStartIP $AKSVIPStartIP -AKSVIPEndIP $AKSVIPEndIP -AKSIPPrefix $AKSIPPrefix -AKSGWIP $AKSGWIP -AKSDNSIP $AKSDNSIP -AKSImagedir $AKSImagedir -AKSWorkingdir $AKSWorkingdir -AKSCloudSvcidr $AKSCloudSvcidr -AKSResourceGroupName $AKSResourceGroupName -Location $Location -resbridgecpip $resbridgecpip -resbridgeresource_group $resbridgeresource_group -resbridgeip1 $resbridgeip1 -resbridgeip2 $resbridgeip2 -csv_path $csv_path
-  
-
-             }
-
+    else {
+         monitorclusterstate
     }
-
-    function runMocRBInstall{
-        param (
-        $remotevar=@{ 
-                        AzureSubId = $config.AzureSubID 
-                        AzureSPNAppID= $config.AzureSPNAppID 
-                        AzureSPNSecret= $config.AzureSPNSecret 
-                        AzureTenantID= $config.AzureTenantID 
-                        KeyVault= $config.KeyVault
-                        AKSvnetname= $config.AKSvnetname
-                        AKSvSwitchName =$config.AKSvSwitchName
-                        AKSNodeStartIP= $config.AKSNodeStartIP
-                        AKSNodeEndIP= $config.AKSNodeEndIP
-                        AKSVIPStartIP =$config.AKSVIPStartIP
-                        AKSVIPEndIP= $config.AKSVIPEndIP
-                        AKSIPPrefix=$config.AKSIPPrefix
-                        AKSGWIP =$config.AKSGWIP
-                        AKSDNSIP= $config.AKSDNSIP
-                        AKSImagedir =$config.AKSImagedir
-                        AKSWorkingdir =$config.AKSWorkingdir
-                        AKSCloudSvcidr =$config.AKSCloudSvcidr
-                        AKSResourceGroupName= $config.AKSResourceGroupName
-                        Location= $config.Location
-                        resbridgeresource_group= $config.resbridgeresource_group
-                        resbridgeip1= $config.resbridgeip1
-                        resbridgeip2= $config.resbridgeip2
-                        resbridgecpip= $config.resbridgecpip
-                        csv_path=$config.csv_path
-                        }
-                  )
-            Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp -ArgumentList $remotevar -ScriptBlock {
-                param (
-                $RemoteVar
-                )
-        
-        
-                
-                        $AzureSubId = $remotevar.AzureSubID 
-                        $AzureSPNAppID= $remotevar.AzureSPNAppID 
-                        $AzureSPNSecret= $remotevar.AzureSPNSecret 
-                        $AzureTenantID= $remotevar.AzureTenantID 
-                        $KeyVault= $remotevar.KeyVault
-                        $AKSvnetname= $remotevar.AKSvnetname
-                        $AKSvSwitchName =$remotevar.AKSvSwitchName
-                        $AKSNodeStartIP= $remotevar.AKSNodeStartIP
-                        $AKSNodeEndIP= $remotevar.AKSNodeEndIP
-                        $AKSVIPStartIP =$remotevar.AKSVIPStartIP
-                        $AKSVIPEndIP= $remotevar.AKSVIPEndIP
-                        $AKSIPPrefix =$remotevar.AKSIPPrefix
-                        $AKSGWIP =$remotevar.AKSGWIP
-                        $AKSDNSIP= $remotevar.AKSDNSIP
-                        $AKSImagedir =$remotevar.AKSImagedir
-                        $AKSWorkingdir =$remotevar.AKSWorkingdir
-                        $AKSCloudSvcidr =$remotevar.AKSCloudSvcidr
-                        $AKSResourceGroupName= $remotevar.AKSResourceGroupName
-                        $Location= $remotevar.Location
-                        $resbridgeresource_group= $remotevar.resbridgeresource_group
-                        $resbridgeip1= $remotevar.resbridgeip1
-                        $resbridgeip2= $remotevar.resbridgeip2
-                        $resbridgecpip= $remotevar.resbridgecpip
-                        $csv_path=$RemoteVar.csv_path
-                
-                       
-                
-              C:\temp\InstallMocRB.ps1 -AzureSubId $AzureSubID -AzureSPNAppID $AzureSPNAppID -AzureSPNSecret $AzureSPNSecret -AzureTenantID $AzureTenantID -KeyVault $KeyVault -AKSvnetname $AKSvnetname -AKSvSwitchName $AKSvSwitchName -AKSNodeStartIP $AKSNodeStartIP -AKSNodeEndIP $AKSNodeEndIP -AKSVIPStartIP $AKSVIPStartIP -AKSVIPEndIP $AKSVIPEndIP -AKSIPPrefix $AKSIPPrefix -AKSGWIP $AKSGWIP -AKSDNSIP $AKSDNSIP -AKSImagedir $AKSImagedir -AKSWorkingdir $AKSWorkingdir -AKSCloudSvcidr $AKSCloudSvcidr -AKSResourceGroupName $AKSResourceGroupName -Location $Location -resbridgecpip $resbridgecpip -resbridgeresource_group $resbridgeresource_group -resbridgeip1 $resbridgeip1 -resbridgeip2 $resbridgeip2 -csv_path $csv_path
-          
-        
-                     }
-        
-            }
-        
-    function addcustomlocation{
-    param($remotevar=@{
-                AzureSPNAppID= $config.AzureSPNAppID 
-                AzureSPNSecret= $config.AzureSPNSecret 
-                AzureTenantID= $config.AzureTenantID  
-                resource_group=$config.resbridgeresource_group
-                subscription=$config.AzureSubID
-                Location=$config.Location
-                customloc_name=$config.customloc_name
-                vSwitchName=$config.AKSvSwitchName
-                csv_path=$config.csv_path
-                akshybrid_virtualnetwork=$config.akshybrid_virtualnetwork
-                akshybrid_ipaddressprefix=$config.akshybrid_ipaddressprefix
-                akshybrid_gateway=$config.akshybrid_gateway
-                akshybrid_dns=$config.akshybrid_dns
-                akshybrid_vippoolstart=$config.akshybrid_vippoolstart
-                akshybrid_vippoolend=$config.akshybrid_vippoolstart
-                akshybrid_k8snodeippoolstart=$config.akshybrid_k8snodeippoolstart
-                akshybrid_k8snodeippoolend=$config.akshybrid_k8snodeippoolstart
-                vmss_vnetname=$config.vmss_vnetname
-                }
-        )
-
-    Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp -ArgumentList $remotevar -ScriptBlock {
-
-         param (
-        $RemoteVar
-        )
-        
-
-                $AzureSPNAppID= $remotevar.AzureSPNAppID 
-                $AzureSPNSecret= $remotevar.AzureSPNSecret 
-                $AzureTenantID= $remotevar.AzureTenantID
-                $resource_group=$remotevar.resource_group
-                $subscription=$remotevar.subscription
-                $Location=$remotevar.Location
-                $customlocname=$remotevar.customloc_name
-                $vSwitchName=$RemoteVar.vSwitchName
-                $csv_path=$remotevar.csv_path
-                $vmss_vnetname=$remotevar.vmss_vnetname
-                $akshybrid_virtualnetwork=$remotevar.akshybrid_virtualnetwork
-                $akshybrid_ipaddressprefix=$remotevar.akshybrid_ipaddressprefix
-                $akshybrid_gateway=$remotevar.akshybrid_gateway
-                $akshybrid_dns=$remotevar.akshybrid_dns
-                $akshybrid_vippoolstart=$remotevar.akshybrid_vippoolstart
-                $akshybrid_vippoolend=$remotevar.akshybrid_vippoolend
-                $akshybrid_k8snodeippoolstart=$remotevar.akshybrid_k8snodeippoolstart
-                $akshybrid_k8snodeippoolend=$remotevar.akshybrid_k8snodeippoolend
-
-        Write-Host "Logging into Azure" -ForegroundColor Green -BackgroundColor Black
-
-        az login --use-device-code --tenant $azuretenantid
-        az config set extension.use_dynamic_install=yes_without_prompt
-
-        Install-Module -Name ArcHci -RequiredVersion 0.2.18
-
-        $hciClusterId= (Get-AzureStackHci).AzureResourceUri
-        $resource_name= ((Get-AzureStackHci).AzureResourceName) + "-arcbridge"
-       
-
-      #Create VM Operator Extension
-      az k8s-extension create --cluster-type appliances --cluster-name $resource_name --resource-group $resource_group --name hci-vmoperator --extension-type Microsoft.AZStackHCI.Operator --scope cluster --release-namespace helm-operator2 --configuration-settings Microsoft.CustomLocation.ServiceAccount=hci-vmoperator --config-protected-file $csv_path\ResourceBridge\hci-config.json --configuration-settings HCIClusterID=$hciClusterId --auto-upgrade true
-
-      #Create AKS-Hybrid Extension
-      az k8s-extension create -g $resource_group -c $resource_name --cluster-type appliances --name hci-aksoperator --extension-type Microsoft.HybridAKSOperator --config Microsoft.CustomLocation.ServiceAccount=hci-vmoperator --version "0.1.101-onebranch-official" --release-train "staging" 
-   
-      #Get Applicance Extension Detail
-      $applianceID=(az arcappliance show -g $resource_group  -n $resource_name --query id -o tsv)
-       
-      $operatorname = "hci-vmoperator"
-      
-      #VM Operator Extension ID
-      $extensionID=(az k8s-extension show -g $resource_group  -c $resource_name --cluster-type appliances --name $operatorname --query id -o tsv)
-      
-      #AKS Hybrid Extension ID
-      $ClusterExtensionResourceId=az k8s-extension show -g $resource_group -c $resource_name --cluster-type appliances --name hci-aksoperator --query id -o tsv
-
-
-      #Create Custom Location with VM Operator
-      az customlocation create --resource-group $resource_group --name $CustomLocName --cluster-extension-ids $extensionID --namespace $operatorname --host-resource-id $applianceID
-       
-      #Update Custom Location with AKS-Hybrid Extension
-      az customlocation patch -g $resource_group -n $CustomLocName --namespace $operatorname  --host-resource-id $applianceID --cluster-extension-ids $ClusterExtensionResourceId $extensionID                  
-
-
-      #VM-Operator- VNet Creation Repeat this step for every new Vnet used by VM Operator
-      
-      Write-Host "Creating Virtual Network Resource for Arc Virtual Machine Management" -ForegroundColor Green -BackgroundColor Black
-
-      #$vlanid="0"   
-
-      $vnetName=$vmss_vnetname
-
-      New-MocGroup -name "Default_Group" -location "MocLocation"
-        
-      New-MocVirtualNetwork -name "$vnetName" -group "Default_Group" -tags @{'VSwitch-Name' = "$vSwitchName"}  
-
-      az azurestackhci virtualnetwork create --subscription $subscription --resource-group $resource_group --extended-location name="/subscriptions/$subscription/resourceGroups/$resource_group/providers/Microsoft.ExtendedLocation/customLocations/$customlocname" type="CustomLocation" --location $Location --network-type "Transparent" --name $vnetName #--vlan $vlanid
-
-      #VM-Operator-Marketplace Image Download
-       
-      $osType = "Windows"
-
-      $customLocationID=(az customlocation show --resource-group $resource_group --name "$customlocname" --query id -o tsv)
-
-      az azurestackhci image create --subscription $subscription --resource-group $resource_group --extended-location name=$customLocationID type="CustomLocation" --location $Location --name "Server22AECore"  --os-type $osType --offer "windowsserver" --publisher "microsoftwindowsserver" --sku "2022-datacenter-azure-edition-core" --version "20348.707.220609"
-
-      #AKS-Hybrid Create AKS Virtual Network
-   
-
-      New-KvaVirtualNetwork -name $akshybrid_virtualnetwork -vswitchname "$vSwitchName" -ipaddressprefix $akshybrid_ipaddressprefix  -gateway $akshybrid_gateway -dnsservers $akshybrid_dns -vippoolstart $akshybrid_vippoolstart -vippoolend $akshybrid_vippoolend -k8snodeippoolstart $akshybrid_k8snodeippoolstart -k8snodeippoolend $akshybrid_k8snodeippoolend -kubeconfig $csv_path\ResourceBridge\config\ -vLanID 42
-      
-      az hybridaks vnet create --name $akshybrid_virtualnetwork --resource-group $resource_group --custom-location $customlocname --moc-vnet-name $akshybrid_virtualnetwork
-      
-      #AKS-Hybrid Download Mariner Images
-      Add-ArcHciK8sGalleryImage -k8sVersion 1.22.11
-
+    
+    
+    
     }
-
-}
-
-
-
-
-#End Function Region
-
-#Begin Main Region
-
-<#---------------------------------------------------------------------------------------------------------------#>
-
-
-$config=LoadVariables
-$ServerList = $config.Node01, $config.Node02
-
-$azlogin = Connect-AzAccount -Subscription $config.azuresubid 
-Select-AzSubscription -Subscription $config.AzureSubID
-#Set AD Domain Cred
-$AzDJoin = Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "djoin"
-$ADcred = [pscredential]::new("fc\djoin",$AZDJoin.SecretValue)
-#$ADpassword = ConvertTo-SecureString "" -AsPlainText -Force
-#$ADCred = New-Object System.Management.Automation.PSCredential ("contoso\djoiner", $ADpassword)
-
-#Set Cred for AAD tenant and subscription
-$AADAccount = "azstackadmin@azurestackdemo1.onmicrosoft.com"
-$AADAdmin=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "azurestackadmin"
-$AADCred = [pscredential]::new("azstackadmin@azurestackdemo1.onmicrosoft.com",$AADAdmin.SecretValue)
-$Arcsecretact=Get-AzKeyVaultSecret -VaultName $config.KeyVault -Name "FCSPN"
-$ARCSecret=$arcsecretact.SecretValue
-$Session1=New-PSSession -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp
-
-ConfigureWorkstation
-ConfigureNodes
-ConfigureNode01
-ConfigureNode02
-PrepareStorage
-CreateCluster
-SetLiveMigration
-DeployS2D
-EnableCAU
-ConfirmFunctionLevels
-CreateCSV
-CreateCloudWitness
-SetNetintents
-
-registerhcicluster
-copyAKSRBInstall
-runAKSRBInstall
-
-addcustomlocation
-
-
-
-
     
+    function copyAKSRBInstall {
+    param ()
     
+    New-Item -Path \\$($config.Node01)\c$ -Name Temp -ItemType Directory
     
+    Copy-Item C:\Scripts\InstallArcRB.ps1 -Destination \\$($config.Node01)\C$\temp
+    }
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    $orginalErrorAction = $ErrorActionPreference
-            $ErrorActionPreference = "Inquire"
-            
-            $logFile = ('.\ExecutionTranscript.log')
-            Start-Transcript -Path $logFile -Append
-            
-            try 
-            {
-                Initialize-Variables
-                $progressLog = Get-Content -Path '.\progress.log'
-            
-                $currentStepName = 'Init'
-                $currentStepIndex = 0
-            
-                do 
-                {
-                    if ($progressLog[$currentStepIndex].Contains("Pending"))
-                    {
-                        $currentStepName = ($progressLog[$currentStepIndex].Split())[0]
-                        Invoke-Expression -Command $currentStepName
+    function copyMOCRBInstall {
+        param ()
+        
+        New-Item -Path \\$($config.Node01)\c$ -Name Temp -ItemType Directory
+        
+        Copy-Item C:\Deployment\InstallMocRB.ps1 -Destination \\$($config.Node01)\C$\temp
+        }
+    function runAKSRBInstall{
+    param (
+    $remotevar=@{ 
+                    AzureSubId = $config.AzureSubID 
+                    AzureSPNAppID= $config.AzureSPNAppID 
+                    AzureSPNSecret= $config.AzureSPNSecret 
+                    AzureTenantID= $config.AzureTenantID 
+                    KeyVault= $config.KeyVault
+                    AKSvnetname= $config.AKSvnetname
+                    AKSvSwitchName =$config.AKSvSwitchName
+                    AKSNodeStartIP= $config.AKSNodeStartIP
+                    AKSNodeEndIP= $config.AKSNodeEndIP
+                    AKSVIPStartIP =$config.AKSVIPStartIP
+                    AKSVIPEndIP= $config.AKSVIPEndIP
+                    AKSIPPrefix =$config.AKSIPPrefix
+                    AKSGWIP =$config.AKSGWIP
+                    AKSDNSIP= $config.AKSDNSIP
+                    AKSImagedir =$config.AKSImagedir
+                    AKSWorkingdir =$config.AKSWorkingdir
+                    AKSCloudSvcidr =$config.AKSCloudSvcidr
+                    AKSResourceGroupName= $config.AKSResourceGroupName
+                    Location= $config.Location
+                    resbridgeresource_group= $config.resbridgeresource_group
+                    resbridgeip1= $config.resbridgeip1
+                    resbridgeip2= $config.resbridgeip2
+                    resbridgecpip= $config.resbridgecpip
+                    csv_path=$config.csv_path
                     }
-                    $currentStepIndex++
-                    $progressLog = Get-Content -Path '.\progress.log' -Force
-                }
-                until ( $progressLog[$currentStepIndex] -eq "Done" )
+              )
+        Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp -ArgumentList $remotevar -ScriptBlock {
+            param (
+            $RemoteVar
+            )
+    
+    
             
-            }
-            finally 
-            {
-                Stop-Transcript
-                $ErrorActionPreference = $orginalErrorAction
-            }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Main execution begins here
-
-
-
-
-
-
-
-write-host -ForegroundColor Green -Object "Cluster is Deployed; Enjoy!"
-
-#Appendix
-
+                    $AzureSubId = $remotevar.AzureSubID 
+                    $AzureSPNAppID= $remotevar.AzureSPNAppID 
+                    $AzureSPNSecret= $remotevar.AzureSPNSecret 
+                    $AzureTenantID= $remotevar.AzureTenantID 
+                    $KeyVault= $remotevar.KeyVault
+                    $AKSvnetname= $remotevar.AKSvnetname
+                    $AKSvSwitchName =$remotevar.AKSvSwitchName
+                    $AKSNodeStartIP= $remotevar.AKSNodeStartIP
+                    $AKSNodeEndIP= $remotevar.AKSNodeEndIP
+                    $AKSVIPStartIP =$remotevar.AKSVIPStartIP
+                    $AKSVIPEndIP= $remotevar.AKSVIPEndIP
+                    $AKSIPPrefix =$remotevar.AKSIPPrefix
+                    $AKSGWIP =$remotevar.AKSGWIP
+                    $AKSDNSIP= $remotevar.AKSDNSIP
+                    $AKSImagedir =$remotevar.AKSImagedir
+                    $AKSWorkingdir =$remotevar.AKSWorkingdir
+                    $AKSCloudSvcidr =$remotevar.AKSCloudSvcidr
+                    $AKSResourceGroupName= $remotevar.AKSResourceGroupName
+                    $Location= $remotevar.Location
+                    $resbridgeresource_group= $remotevar.resbridgeresource_group
+                    $resbridgeip1= $remotevar.resbridgeip1
+                    $resbridgeip2= $remotevar.resbridgeip2
+                    $resbridgecpip= $remotevar.resbridgecpip
+                    $csv_path=$RemoteVar.csv_path
+            
+                   
+            
+          C:\temp\InstallArcRB.ps1 -AzureSubId $AzureSubID -AzureSPNAppID $AzureSPNAppID -AzureSPNSecret $AzureSPNSecret -AzureTenantID $AzureTenantID -KeyVault $KeyVault -AKSvnetname $AKSvnetname -AKSvSwitchName $AKSvSwitchName -AKSNodeStartIP $AKSNodeStartIP -AKSNodeEndIP $AKSNodeEndIP -AKSVIPStartIP $AKSVIPStartIP -AKSVIPEndIP $AKSVIPEndIP -AKSIPPrefix $AKSIPPrefix -AKSGWIP $AKSGWIP -AKSDNSIP $AKSDNSIP -AKSImagedir $AKSImagedir -AKSWorkingdir $AKSWorkingdir -AKSCloudSvcidr $AKSCloudSvcidr -AKSResourceGroupName $AKSResourceGroupName -Location $Location -resbridgecpip $resbridgecpip -resbridgeresource_group $resbridgeresource_group -resbridgeip1 $resbridgeip1 -resbridgeip2 $resbridgeip2 -csv_path $csv_path
+      
+    
+                 }
+    
+        }
+    
+        function runMocRBInstall{
+            param (
+            $remotevar=@{ 
+                            AzureSubId = $config.AzureSubID 
+                            AzureSPNAppID= $config.AzureSPNAppID 
+                            AzureSPNSecret= $config.AzureSPNSecret 
+                            AzureTenantID= $config.AzureTenantID 
+                            KeyVault= $config.KeyVault
+                            AKSvnetname= $config.AKSvnetname
+                            AKSvSwitchName =$config.AKSvSwitchName
+                            AKSNodeStartIP= $config.AKSNodeStartIP
+                            AKSNodeEndIP= $config.AKSNodeEndIP
+                            AKSVIPStartIP =$config.AKSVIPStartIP
+                            AKSVIPEndIP= $config.AKSVIPEndIP
+                            AKSIPPrefix=$config.AKSIPPrefix
+                            AKSGWIP =$config.AKSGWIP
+                            AKSDNSIP= $config.AKSDNSIP
+                            AKSImagedir =$config.AKSImagedir
+                            AKSWorkingdir =$config.AKSWorkingdir
+                            AKSCloudSvcidr =$config.AKSCloudSvcidr
+                            AKSResourceGroupName= $config.AKSResourceGroupName
+                            Location= $config.Location
+                            resbridgeresource_group= $config.resbridgeresource_group
+                            resbridgeip1= $config.resbridgeip1
+                            resbridgeip2= $config.resbridgeip2
+                            resbridgecpip= $config.resbridgecpip
+                            csv_path=$config.csv_path
+                            }
+                      )
+                Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp -ArgumentList $remotevar -ScriptBlock {
+                    param (
+                    $RemoteVar
+                    )
+            
+            
+                    
+                            $AzureSubId = $remotevar.AzureSubID 
+                            $AzureSPNAppID= $remotevar.AzureSPNAppID 
+                            $AzureSPNSecret= $remotevar.AzureSPNSecret 
+                            $AzureTenantID= $remotevar.AzureTenantID 
+                            $KeyVault= $remotevar.KeyVault
+                            $AKSvnetname= $remotevar.AKSvnetname
+                            $AKSvSwitchName =$remotevar.AKSvSwitchName
+                            $AKSNodeStartIP= $remotevar.AKSNodeStartIP
+                            $AKSNodeEndIP= $remotevar.AKSNodeEndIP
+                            $AKSVIPStartIP =$remotevar.AKSVIPStartIP
+                            $AKSVIPEndIP= $remotevar.AKSVIPEndIP
+                            $AKSIPPrefix =$remotevar.AKSIPPrefix
+                            $AKSGWIP =$remotevar.AKSGWIP
+                            $AKSDNSIP= $remotevar.AKSDNSIP
+                            $AKSImagedir =$remotevar.AKSImagedir
+                            $AKSWorkingdir =$remotevar.AKSWorkingdir
+                            $AKSCloudSvcidr =$remotevar.AKSCloudSvcidr
+                            $AKSResourceGroupName= $remotevar.AKSResourceGroupName
+                            $Location= $remotevar.Location
+                            $resbridgeresource_group= $remotevar.resbridgeresource_group
+                            $resbridgeip1= $remotevar.resbridgeip1
+                            $resbridgeip2= $remotevar.resbridgeip2
+                            $resbridgecpip= $remotevar.resbridgecpip
+                            $csv_path=$RemoteVar.csv_path
+                    
+                           
+                    
+                  C:\temp\InstallMocRB.ps1 -AzureSubId $AzureSubID -AzureSPNAppID $AzureSPNAppID -AzureSPNSecret $AzureSPNSecret -AzureTenantID $AzureTenantID -KeyVault $KeyVault -AKSvnetname $AKSvnetname -AKSvSwitchName $AKSvSwitchName -AKSNodeStartIP $AKSNodeStartIP -AKSNodeEndIP $AKSNodeEndIP -AKSVIPStartIP $AKSVIPStartIP -AKSVIPEndIP $AKSVIPEndIP -AKSIPPrefix $AKSIPPrefix -AKSGWIP $AKSGWIP -AKSDNSIP $AKSDNSIP -AKSImagedir $AKSImagedir -AKSWorkingdir $AKSWorkingdir -AKSCloudSvcidr $AKSCloudSvcidr -AKSResourceGroupName $AKSResourceGroupName -Location $Location -resbridgecpip $resbridgecpip -resbridgeresource_group $resbridgeresource_group -resbridgeip1 $resbridgeip1 -resbridgeip2 $resbridgeip2 -csv_path $csv_path
+              
+            
+                         }
+            
+                }
+            
+        function addcustomlocation{
+        param($remotevar=@{
+                    AzureSPNAppID= $config.AzureSPNAppID 
+                    AzureSPNSecret= $config.AzureSPNSecret 
+                    AzureTenantID= $config.AzureTenantID  
+                    resource_group=$config.resbridgeresource_group
+                    subscription=$config.AzureSubID
+                    Location=$config.Location
+                    customloc_name=$config.customloc_name
+                    vSwitchName=$config.AKSvSwitchName
+                    csv_path=$config.csv_path
+                    akshybrid_virtualnetwork=$config.akshybrid_virtualnetwork
+                    akshybrid_ipaddressprefix=$config.akshybrid_ipaddressprefix
+                    akshybrid_gateway=$config.akshybrid_gateway
+                    akshybrid_dns=$config.akshybrid_dns
+                    akshybrid_vippoolstart=$config.akshybrid_vippoolstart
+                    akshybrid_vippoolend=$config.akshybrid_vippoolstart
+                    akshybrid_k8snodeippoolstart=$config.akshybrid_k8snodeippoolstart
+                    akshybrid_k8snodeippoolend=$config.akshybrid_k8snodeippoolstart
+                    vmss_vnetname=$config.vmss_vnetname
+                    }
+            )
+    
+        Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp -ArgumentList $remotevar -ScriptBlock {
+    
+             param (
+            $RemoteVar
+            )
+            
+    
+                    $AzureSPNAppID= $remotevar.AzureSPNAppID 
+                    $AzureSPNSecret= $remotevar.AzureSPNSecret 
+                    $AzureTenantID= $remotevar.AzureTenantID
+                    $resource_group=$remotevar.resource_group
+                    $subscription=$remotevar.subscription
+                    $Location=$remotevar.Location
+                    $customlocname=$remotevar.customloc_name
+                    $vSwitchName=$RemoteVar.vSwitchName
+                    $csv_path=$remotevar.csv_path
+                    $vmss_vnetname=$remotevar.vmss_vnetname
+                    $akshybrid_virtualnetwork=$remotevar.akshybrid_virtualnetwork
+                    $akshybrid_ipaddressprefix=$remotevar.akshybrid_ipaddressprefix
+                    $akshybrid_gateway=$remotevar.akshybrid_gateway
+                    $akshybrid_dns=$remotevar.akshybrid_dns
+                    $akshybrid_vippoolstart=$remotevar.akshybrid_vippoolstart
+                    $akshybrid_vippoolend=$remotevar.akshybrid_vippoolend
+                    $akshybrid_k8snodeippoolstart=$remotevar.akshybrid_k8snodeippoolstart
+                    $akshybrid_k8snodeippoolend=$remotevar.akshybrid_k8snodeippoolend
+    
+            Write-Host "Logging into Azure" -ForegroundColor Green -BackgroundColor Black
+    
+            az login --use-device-code --tenant $azuretenantid
+            az account set --subscription $subscription
+            az config set extension.use_dynamic_install=yes_without_prompt
+    
+            Install-Module -Name ArcHci -Repository PSGallery -AcceptLicense -Force -RequiredVersion 0.2.24
+    
+            $hciClusterId= (Get-AzureStackHci).AzureResourceUri
+            $resource_name= ((Get-AzureStackHci).AzureResourceName) + "-arcbridge"
+            $operatorname = "hci-vmoperator"
+            $aksoperatorname ="hci-aksoperators"
+    
+          #Create VM Operator Extension
+          az k8s-extension create --cluster-type appliances --cluster-name $resource_name --resource-group $resource_group --name $operatorname --extension-type Microsoft.AZStackHCI.Operator --scope cluster --release-namespace helm-operator2 --configuration-settings Microsoft.CustomLocation.ServiceAccount=hci-vmoperator --config-protected-file $csv_path\ResourceBridge\hci-config.json --configuration-settings HCIClusterID=$hciClusterId --auto-upgrade true
+          
+          az k8s-extension delete --cluster-type appliances --cluster-name $resource_name --resource-group $resource_group --name hci-aksoperator
+          #Create AKS-Hybrid Extension
+          az k8s-extension create -g $resource_Group  -c $resource_name --cluster-type appliances --name $aksoperatorname --extension-type Microsoft.HybridAKSOperator --config Microsoft.CustomLocation.ServiceAccount="default"
+          #Get Applicance Extension Detail
+          $applianceID=(az arcappliance show -g $resource_group  -n $resource_name --query id -o tsv)
+          
+          #VM Operator Extension ID
+          $extensionID=(az k8s-extension show -g $resource_group  -c $resource_name --cluster-type appliances --name $operatorname --query id -o tsv)
+          
+          #AKS Hybrid Extension ID
+          $ClusterExtensionResourceId=az k8s-extension show -g $resource_group -c $resource_name --cluster-type appliances --name $aksoperatorname --query id -o tsv
+    
+    
+          #Create Custom Location with VM Operator
+          az customlocation create --resource-group $resource_group --name $CustomLocName --cluster-extension-ids $extensionID --namespace $operatorname --host-resource-id $applianceID
+           
+          #Update Custom Location with AKS-Hybrid Extension
+          az customlocation patch -g $resource_group -n $CustomLocName --namespace $operatorname  --host-resource-id $applianceID --cluster-extension-ids $ClusterExtensionResourceId $extensionID                  
+    
+    
+          #VM-Operator- VNet Creation Repeat this step for every new Vnet used by VM Operator
+          
+          Write-Host "Creating Virtual Network Resource for Arc Virtual Machine Management" -ForegroundColor Green -BackgroundColor Black
+    
+          #$vlanid="0"   
+    
+          $vnetName=$vmss_vnetname
+    
+          New-MocGroup -name "Default_Group" -location "MocLocation"
+            
+          New-MocVirtualNetwork -name "$vnetName" -group "Default_Group" -tags @{'VSwitch-Name' = "$vSwitchName"}  
+    
+          az azurestackhci virtualnetwork create --subscription $subscription --resource-group $resource_group --extended-location name="/subscriptions/$subscription/resourceGroups/$resource_group/providers/Microsoft.ExtendedLocation/customLocations/$customlocname" type="CustomLocation" --location $Location --network-type "Transparent" --name $vnetName #--vlan $vlanid
+    
+          #VM-Operator-Marketplace Image Download
+           
+          $osType = "Windows"
+    
+          $customLocationID=(az customlocation show --resource-group $resource_group --name "$customlocname" --query id -o tsv)
+    
+          az azurestackhci image create --subscription $subscription --resource-group $resource_group --extended-location name=$customLocationID type="CustomLocation" --location $Location --name "Server22AECore"  --os-type $osType --offer "windowsserver" --publisher "microsoftwindowsserver" --sku "2022-datacenter-azure-edition-core" --version "20348.707.220609"
+    
+          #AKS-Hybrid Create AKS Virtual Network
+          New-ArcHciVirtualNetwork -name $akshybrid_virtualnetwork -vswitchName "$vSwitchName" -ipaddressprefix $akshybrid_ipaddressprefix -gateway $akshybrid_gateway -dnsservers $akshybrid_dns -vippoolstart $akshybrid_vippoolstart -vippoolend $akshybrid_vippoolend -k8snodeippoolstart $akshybrid_k8snodeippoolstart -k8snodeippoolend $akshybrid_k8snodeippoolend 
+          az hybridaks vnet create --name $akshybrid_virtualnetwork --resource-group $resource_group --custom-location $customlocname --moc-vnet-name $akshybrid_virtualnetwork
+          
+          #AKS-Hybrid Download Mariner Images
+          Add-ArcHciK8sGalleryImage -k8sVersion 1.22.11 -version 1.0.16.10113
+    
+        }
+    
+    }
+    function removecustomlocation{
+        param($remotevar=@{
+                    AzureSPNAppID= $config.AzureSPNAppID 
+                    AzureSPNSecret= $config.AzureSPNSecret 
+                    AzureTenantID= $config.AzureTenantID  
+                    resource_group=$config.resbridgeresource_group
+                    subscription=$config.AzureSubID
+                    Location=$config.Location
+                    customloc_name=$config.customloc_name
+                    vSwitchName=$config.AKSvSwitchName
+                    csv_path=$config.csv_path
+                    akshybrid_virtualnetwork=$config.akshybrid_virtualnetwork
+                    akshybrid_ipaddressprefix=$config.akshybrid_ipaddressprefix
+                    akshybrid_gateway=$config.akshybrid_gateway
+                    akshybrid_dns=$config.akshybrid_dns
+                    akshybrid_vippoolstart=$config.akshybrid_vippoolstart
+                    akshybrid_vippoolend=$config.akshybrid_vippoolstart
+                    akshybrid_k8snodeippoolstart=$config.akshybrid_k8snodeippoolstart
+                    akshybrid_k8snodeippoolend=$config.akshybrid_k8snodeippoolstart
+                    vmss_vnetname=$config.vmss_vnetname
+                    }
+            )
+    
+        Invoke-Command -ComputerName $config.Node01 -Credential $ADcred -Authentication Credssp -ArgumentList $remotevar -ScriptBlock {
+    
+             param (
+            $RemoteVar
+            )
+            
+    
+                    $AzureSPNAppID= $remotevar.AzureSPNAppID 
+                    $AzureSPNSecret= $remotevar.AzureSPNSecret 
+                    $AzureTenantID= $remotevar.AzureTenantID
+                    $resource_group=$remotevar.resource_group
+                    $subscription=$remotevar.subscription
+                    $Location=$remotevar.Location
+                    $customlocname=$remotevar.customloc_name
+                    $vSwitchName=$RemoteVar.vSwitchName
+                    $csv_path=$remotevar.csv_path
+                    $vmss_vnetname=$remotevar.vmss_vnetname
+                    $akshybrid_virtualnetwork=$remotevar.akshybrid_virtualnetwork
+                    $akshybrid_ipaddressprefix=$remotevar.akshybrid_ipaddressprefix
+                    $akshybrid_gateway=$remotevar.akshybrid_gateway
+                    $akshybrid_dns=$remotevar.akshybrid_dns
+                    $akshybrid_vippoolstart=$remotevar.akshybrid_vippoolstart
+                    $akshybrid_vippoolend=$remotevar.akshybrid_vippoolend
+                    $akshybrid_k8snodeippoolstart=$remotevar.akshybrid_k8snodeippoolstart
+                    $akshybrid_k8snodeippoolend=$remotevar.akshybrid_k8snodeippoolend
+    
+            Write-Host "Logging into Azure" -ForegroundColor Green -BackgroundColor Black
+    
+            az login --use-device-code --tenant $azuretenantid
+            az account set --subscription $subscription
+            az config set extension.use_dynamic_install=yes_without_prompt
+    
+            Install-Module -Name ArcHci -Repository PSGallery -AcceptLicense -Force -RequiredVersion 0.2.24
+    
+            $hciClusterId= (Get-AzureStackHci).AzureResourceUri
+            $resource_name= ((Get-AzureStackHci).AzureResourceName) + "-arcbridge"
+            $operatorname = "hci-vmoperator"
+            $aksoperatorname ="hci-aksoperators"
+    
+          #Delete AKS Hybrid Network
+          az hybridaks vnet delete --resource-group $resource_group --name $akshybrid_virtualnetwork
+          Remove-MocVirtualNetwork -group "target-group" -name $akshybrid_virtualnetwork
+          
+          #Delete AKS Images
+        #  Remove-ArcHciK8sGalleryImage -k8sVersion 1.22.11 -version 1.0.16.10113
+    
+          #Delete VM Operator Virtual Network
+          az azurestackhci virtualnetwork delete --subscription $subscription --resource-group $resource_group --name $vnetName  --yes
+          New-MocVirtualNetwork -name "$vnetName" -group "Default_Group"
+    
+          #Delete VM Gallery Image
+          az azurestackhci galleryimage delete --subscription $subscription --resource-group $resource_group --name "Server22AECore"
+     
+          #Remove Custom  Location
+          az customlocation delete --resource-group $resource_group --name $customlocname --yes
+          az k8s-extension delete --cluster-type appliances --cluster-name $resource_name --resource-group $resource_group --name $aksoperatorname --yes
+          az k8s-extension delete --cluster-type appliances --cluster-name $resource_name --resource-group $resource_group --name $operatorname --yes
+        }
+    
+    }
+    function monitorclusterstate {
+        param ()
+        $clusterstate=Get-ClusterResource -Name "Cluster IP Address" -Cluster $config.ClusterName 
+      
+      if ($clusterstate.State -ne "online" ) {
+        Write-Host "Cluster is not ready yet, starting resources" -ForegroundColor Green -BackgroundColor Black
+        Get-ClusterResource -Name "Cluster IP Address" | start-Clusterresource 
+      }
+      
+        elseif ($clusterstate.State -eq "online" ) {
+            Write-Host "Cluster is  ready" -ForegroundColor Green -BackgroundColor Black
+        }
+    
+    }
+    
+    function checkresourcegroup {
+        param()
+    $resourcegroup=Get-AzResourceGroup -Name $config.resbridgeresource_group -Location $config.Location
+    if ($resourcegroup.provisioningstate -eq "Succeeded") {
+        Write-Host "Resource Group has been pre-created" -ForegroundColor Black -BackgroundColor Green
+    } 
+    elseif ($resourcegroup.provisioningstate -ne "Succeeded") {
+        New-AzResourceGroup -Name $config.resbridgeresource_group -Location $config.Location
+    }   
+    }
+    
+    
+    
+    #End Function Region
+    
+    #Begin Main Region
+    
+    <#---------------------------------------------------------------------------------------------------------------#>
+    
+    
+    $config=LoadVariables
+    $ServerList = $config.Node01, $config.Node02
+    
+    
+    
+    RetrieveCredentials
+    ConfigureWorkstation
+    ConfigureNodes
+    ConfigureNode01
+    ConfigureNode02
+    PrepareStorage
+    CreateCluster
+    DeployS2D
+    EnableCAU
+    CreateCSV
+    CreateCloudWitness
+    SetNetintents
+    registerhcicluster
+    #copyAKSRBInstall
+    #runAKSRBInstall
+    copyMOCRBInstall
+    checkresourcegroup
+    runMocRBInstall
+    addcustomlocation
+    
+    
+    
+    
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    # Main execution begins here
+    
+    
+    
+    
+    
+    
+    
+    write-host -ForegroundColor Green -Object "Cluster is Deployed; Enjoy!"
+    
+    #Appendix
+    
+    
