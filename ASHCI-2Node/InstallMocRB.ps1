@@ -21,11 +21,11 @@ param(
     [String] $AKSVIPStartIP,
     [Parameter(Mandatory)]
     [String] $AKSVIPEndIP ,
+    #[Parameter(Mandatory)]
+    #[String] $AKSIPPrefix ,
     [Parameter(Mandatory)]
-    [String] $AKSIPPrefix ,
-    [Parameter(Mandatory)]
-    [String] $AKSGWIP ,
-    [Parameter(Mandatory)]
+    #[String] $AKSGWIP ,
+    #[Parameter(Mandatory)]
     [String] $AKSDNSIP,
     [Parameter(Mandatory)]
     [String] $AKSImagedir ,
@@ -46,7 +46,13 @@ param(
     [Parameter(Mandatory)]
     [String] $resbridgecpip,
     [Parameter(Mandatory)]
-    [String] $csv_path
+    [String] $csv_path,
+    [Parameter(Mandatory)]
+    [String] $resbridge_ipaddressprefix,
+    [Parameter(Mandatory)]
+    [String] $resbridgevlanid,
+    [Parameter(Mandatory)]
+    [String] $resbridge_gateway
     
 
 ) 
@@ -55,8 +61,8 @@ function  InstallPreReqs {
     param ()
         Install-PackageProvider -Name NuGet -Force
         Install-Module -Name PowershellGet -Force -Confirm:$false -SkipPublisherCheck
-        Install-Module -Name ArcHci -Repository PSGallery -AcceptLicense -Force -RequiredVersion 0.2.21
-
+        Install-Module -Name ArcHci -Repository PSGallery -AcceptLicense -Force -RequiredVersion 0.2.24
+        
         az extension remove --name arcappliance
         az extension remove --name k8s-configuration
         az extension remove --name k8s-extension
@@ -86,6 +92,9 @@ function RunMocInstall {
         Write-Host "Installing MOC" -ForegroundColor Black -BackgroundColor Green
         Install-Moc
 
+         #Downloading Gallery Image
+         Write-Host "Downloading K8s Gallery Image" -ForegroundColor Black -BackgroundColor Green
+         Add-ArcHcik8sGalleryImage -k8sVersion 1.22.11 -version 1.0.16.10113
 }
 
 function AzLogin {
@@ -108,7 +117,7 @@ function  InstallArcRB {
 	
     $resource_name= ((Get-AzureStackHci).AzureResourceName) + "-arcbridge" 
 	import-module archci -RequiredVersion 0.2.21    
-    New-ArcHciConfigFiles -subscriptionID $AzureSubID -location $location -resourceGroup $resbridgeresource_group -resourceName $resource_name -workDirectory $csv_path\ResourceBridge -controlPlaneIP $resbridgecpip -vipPoolStart $resbridgecpip -vipPoolEnd $resbridgecpip -k8snodeippoolstart $resbridgeip1 -k8snodeippoolend $resbridgeip2 -gateway $AKSGWIP -dnsservers $AKSDNSIP -ipaddressprefix $AKSIPPrefix -vswitchName $AKSvSwitchName -vnetName $AKSvnetname
+    New-ArcHciConfigFiles -subscriptionID $AzureSubID -location $location -resourceGroup $resbridgeresource_group -resourceName $resource_name -workDirectory $csv_path\ResourceBridge -controlPlaneIP $resbridgecpip -vipPoolStart $resbridgecpip -vipPoolEnd $resbridgecpip -k8snodeippoolstart $resbridgeip1 -k8snodeippoolend $resbridgeip2 -gateway $resbridge_gateway -dnsservers $AKSDNSIP -ipaddressprefix $resbridge_ipaddressprefix  -vswitchName $AKSvSwitchName -vnetName $AKSvnetname -vlanid $resbridgevlanid 
 
     Write-Host "Validating Azure Arc Resource Bridge" -ForegroundColor Black -BackgroundColor Green 
     az arcappliance validate hci --config-file $csv_path\ResourceBridge\hci-appliance.yaml
